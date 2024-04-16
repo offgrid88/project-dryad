@@ -1,4 +1,5 @@
 # project-dryad
+Dryad is a plant monitoring system designed for simplicity and efficiency. It focuses on providing essential plant data while being cost-effective and easy to assemble. The project includes a PCB for flashing the firmware and an app for downloading. It is also available as a pre-made, pre-flashed product for immediate use.
 
 ### Installing Zephyr
 
