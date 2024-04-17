@@ -1,0 +1,5 @@
+.west
+.venv
+build
+venv
+zephyr
