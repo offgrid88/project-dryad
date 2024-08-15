@@ -1,62 +1,40 @@
-| Supported Targets | ESP32 | ESP32-C2 | ESP32-C3 | ESP32-C6 | ESP32-H2 | ESP32-S2 | ESP32-S3 |
-| ----------------- | ----- | -------- | -------- | -------- | -------- | -------- | -------- |
+### README for Project Dryad
 
-# ADC Single Read Example
+---
 
-(See the README.md file in the upper level 'examples' directory for more information about examples.)
+#### Project Overview
+Project Dryad leverages cutting-edge technology to monitor plant health, offering real-time insights and notifications. It is built on the robust ESP32 microcontroller unit (MCU) and integrates various sensors to assess soil moisture and overall plant condition. The system communicates via MQTT protocol to provide updates directly to your email, ensuring you are always informed about your plant's health.
 
-This example demonstrates the following:
+#### Key Features
+- **Advanced Sensing:** Utilizes soil moisture sensors along with other environmental sensors to track plant conditions.
+- **MQTT Communication:** Sends sensor data through MQTT, allowing for efficient remote monitoring.
+- **Battery Powered:** Designed for longevity with a battery that supports extended operational periods.
+- **Indicator Lights:** Provides physical status updates via built-in lights, useful when the internet connection is unavailable.
+- **Email Notifications:** Automatic email alerts to keep you informed about your plant’s needs and health.
 
-- How to obtain a oneshot ADC reading from a GPIO pin using the ADC oneshot mode driver
-- How to use the ADC Calibration functions to obtain a calibrated result (in mV)
+#### Hardware Requirements
+- ESP32 Microcontroller Unit
+- Soil moisture sensor
+- Environmental sensors (temperature, light, humidity)
+- Battery pack
+- LEDs for status indication
 
-## How to use example
+#### Software Setup
+1. **Flash ESP32 with Firmware:** Download and install the firmware to the ESP32.
+2. **Configure MQTT:** Set up MQTT credentials and connect to your network.
+3. **Sensor Calibration:** Follow the steps to calibrate each sensor for accurate readings.
 
-### Hardware Required
+#### Installation
+- Assemble the hardware components according to the schematic provided.
+- Install the software dependencies.
+- Deploy the code to the ESP32.
 
-* A development board with ESP SoC
-* A USB cable for power supply and programming
+#### Usage
+- Power on the device.
+- The device will automatically connect to the configured MQTT broker.
+- Check your email or MQTT client for real-time updates on plant health.
 
-In this example, you need to connect a voltage source (e.g. a DC power supply) to the GPIO pins specified in `oneshot_read_main.c` (see the macros defined on the top of the source file). Feel free to modify the pin setting.
-
-### Build and Flash
-
-Build the project and flash it to the board, then run monitor tool to view serial output:
-
-```
-idf.py -p PORT flash monitor
-```
-
-(To exit the serial monitor, type ``Ctrl-]``.)
-
-See the Getting Started Guide for full steps to configure and use ESP-IDF to build projects.
-
-## Example Output
-
-Running this example, you will see the following log output on the serial monitor:
-
-```
-I (304) ADC_ONESHOT: calibration scheme version is Curve Fitting
-I (304) ADC_ONESHOT: calibration scheme version is Curve Fitting
-I (314) ADC_ONESHOT: ADC1 Channel[2] Raw Data: 0
-I (314) ADC_ONESHOT: ADC1 Channel[2] Cali Voltage: 0 mV
-I (1324) ADC_ONESHOT: ADC1 Channel[3] Raw Data: 664
-I (1324) ADC_ONESHOT: ADC1 Channel[3] Cali Voltage: 559 mV
-I (2324) ADC_ONESHOT: ADC2 Channel[0] Raw Data: 580
-I (2324) ADC_ONESHOT: ADC2 Channel[0] Cali Voltage: 498 mV
-I (3324) ADC_ONESHOT: ADC1 Channel[2] Raw Data: 0
-I (3324) ADC_ONESHOT: ADC1 Channel[2] Cali Voltage: 0 mV
-I (4324) ADC_ONESHOT: ADC1 Channel[3] Raw Data: 666
-I (4324) ADC_ONESHOT: ADC1 Channel[3] Cali Voltage: 561 mV
-I (5324) ADC_ONESHOT: ADC2 Channel[0] Raw Data: 575
-I (5324) ADC_ONESHOT: ADC2 Channel[0] Cali Voltage: 495 mV
-...
-```
-
-## Troubleshooting
-
-If following warning is printed out, it means the calibration required eFuse bits are not burnt correctly on your board. The calibration will be skipped. Only raw data will be printed out.
-```
-W (300) ADC_ONESHOT: eFuse not burnt, skip calibration
-I (1310) ADC_ONESHOT: ADC1 Channel[2] Raw Data: 0
-```
+#### Troubleshooting
+- Ensure all connections are secure if the device fails to send data.
+- Verify battery levels if the indicator lights do not function as expected.
+- Check network settings if MQTT messages are not being received.
