@@ -18,6 +18,7 @@ Project Dryad leverages cutting-edge technology to monitor plant health, offerin
 - Environmental sensors (temperature, light, humidity)
 - Battery pack
 - LEDs for status indication
+https://2btrading.tn/accueil/9488-module-d-affichage-circulaire-096-240x198-msp0963-st7789-pour-raspberry-stm32-.html
 
 #### Software Setup
 1. **Flash ESP32 with Firmware:** Download and install the firmware to the ESP32.
