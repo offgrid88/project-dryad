@@ -18,9 +18,17 @@ static const char *TAG = "moisture_sensor";
 #define ADC_CHANNEL     ADC_CHANNEL_0   // GPIO0 for ESP32-C3
 #define ADC_ATTEN       ADC_ATTEN_DB_12
 
+// Task configuration
+#define MOISTURE_TASK_STACK_SIZE  4096
+#define MOISTURE_TASK_PRIORITY    1
+#define MOISTURE_TASK_CORE        0
+
 static adc_oneshot_unit_handle_t adc1_handle;
 static adc_cali_handle_t adc_cali_handle = NULL;
 static bool do_calibration = false;
+
+// Task handle
+static TaskHandle_t moisture_task_handle = NULL;
 
 void setup_adc() {
   // Initialize ADC
@@ -77,7 +85,7 @@ int read_moisture_percent() {
   return moisture_percent;
 }
 
-extern "C" void app_main(void) {
+void moisture_sensor_task(void* pvParameters) {
   setup_adc();
   ESP_LOGI(TAG, "Moisture sensor initialized");
 
@@ -85,4 +93,20 @@ extern "C" void app_main(void) {
   read_moisture_percent();
   vTaskDelay(pdMS_TO_TICKS(2000));
   }
+}
+
+extern "C" void app_main(void) {
+  // Create the moisture sensor task
+  xTaskCreatePinnedToCore(
+    moisture_sensor_task,    // Task function
+    "moistureSensor",        // Task name
+    MOISTURE_TASK_STACK_SIZE,// Stack size
+    NULL,                    // Parameters
+    MOISTURE_TASK_PRIORITY,  // Priority
+    &moisture_task_handle,   // Task handle
+    MOISTURE_TASK_CORE       // Core ID
+  );
+
+  // Add any other initialization or tasks here
+  ESP_LOGI(TAG, "Application started");
 }
