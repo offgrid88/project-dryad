@@ -1,77 +1,88 @@
 #include <stdio.h>
+#include <inttypes.h>
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
-#include "driver/adc.h"
-#include "esp_adc_cal.h"
-#include "mqtt_client.h"
+#include "esp_adc/adc_oneshot.h"
+#include "esp_adc/adc_cali.h"
+#include "esp_adc/adc_cali_scheme.h"
 #include "esp_log.h"
 
-extern "C" void app_main();
+static const char *TAG = "moisture_sensor";
 
-#define DEFAULT_VREF    1100
-#define NO_OF_SAMPLES   64
+// TODO: these values need calibration
+#define DRY_VALUE 1200
+#define WET_VALUE 3600
 
-static esp_adc_cal_characteristics_t *adc_chars;
-static const adc_channel_t channel = ADC_CHANNEL_6;  // GPIO34 if ADC1
-static const adc_atten_t atten = ADC_ATTEN_DB_12;
-static const adc_unit_t unit = ADC_UNIT_1;
+// For ESP32-C3, use ADC1 channel 0-5
+#define ADC_UNIT        ADC_UNIT_1
+#define ADC_CHANNEL     ADC_CHANNEL_0   // GPIO0 for ESP32-C3
+#define ADC_ATTEN       ADC_ATTEN_DB_12
 
-static const char *MQTT_URI = "mqtt://mqtt.aymenrachdi.xyz";
-static esp_mqtt_client_handle_t mqtt_client = NULL;
-static const char *TAG = "MQTT_APP";
+static adc_oneshot_unit_handle_t adc1_handle;
+static adc_cali_handle_t adc_cali_handle = NULL;
+static bool do_calibration = false;
 
-// Define the dry (0% moisture) and wet (100% moisture) calibration values
-const uint32_t DRY_VALUE = 0;    // adjust this value
-const uint32_t WET_VALUE = 3000; // adjust this value
-
-void mqtt_app_start(void) {
-  esp_mqtt_client_config_t mqtt_cfg = {};
-  mqtt_cfg.broker.address.uri = MQTT_URI;
-
-  mqtt_client = esp_mqtt_client_init(&mqtt_cfg);
-  if (mqtt_client == NULL) {
-    ESP_LOGE(TAG, "Failed to initialize MQTT client");
-    return;
+void setup_adc() {
+  // Initialize ADC
+  adc_oneshot_unit_init_cfg_t init_config = {
+    .unit_id = ADC_UNIT,
+  };
+  ESP_ERROR_CHECK(adc_oneshot_new_unit(&init_config, &adc1_handle));
+  
+  // Configure ADC
+  adc_oneshot_chan_cfg_t config = {
+    .atten = ADC_ATTEN,
+    .bitwidth = ADC_BITWIDTH_DEFAULT,
+  };
+  ESP_ERROR_CHECK(adc_oneshot_config_channel(adc1_handle, ADC_CHANNEL, &config));
+  
+  // Try to calibrate ADC
+  adc_cali_curve_fitting_config_t cali_config = {
+    .unit_id = ADC_UNIT,
+    .atten = ADC_ATTEN,
+    .bitwidth = ADC_BITWIDTH_DEFAULT,
+  };
+  
+  if (adc_cali_create_scheme_curve_fitting(&cali_config, &adc_cali_handle) == ESP_OK) {
+    do_calibration = true;
+    ESP_LOGI(TAG, "ADC calibration enabled");
+  } else {
+    ESP_LOGW(TAG, "ADC calibration failed, using raw values");
   }
-
-  esp_err_t err = esp_mqtt_client_start(mqtt_client);
-  if (err != ESP_OK) {
-    ESP_LOGE(TAG, "Failed to start MQTT client: %s", esp_err_to_name(err));
-    return;
-  }
-
-  ESP_LOGI(TAG, "MQTT client started successfully");
 }
 
-void send_mqtt_message(uint32_t moisture_percent) {
-  char payload[100];
-  sprintf(payload, "Moisture Level: %ld%%", moisture_percent);
-  esp_mqtt_client_publish(mqtt_client, "soil/moisture", payload, 0, 1, 0);
+int read_moisture_percent() {
+  // Read raw ADC value
+  int raw_value = 0;
+  ESP_ERROR_CHECK(adc_oneshot_read(adc1_handle, ADC_CHANNEL, &raw_value));
+
+  // Convert to voltage if calibration is available
+  int voltage = 0;
+  if (do_calibration) {
+    ESP_ERROR_CHECK(adc_cali_raw_to_voltage(adc_cali_handle, raw_value, &voltage));
+  } else {
+    // Approximate conversion if no calibration
+    voltage = (raw_value * 3300) / 4095;
+  }
+
+  // Calculate moisture percentage (inverted scale)
+  int moisture_percent = 100 * (voltage - DRY_VALUE) / (WET_VALUE - DRY_VALUE);
+
+  // Clamp values between 0-100%
+  moisture_percent = (moisture_percent > 100) ? 100 : 
+                    (moisture_percent < 0) ? 0 : moisture_percent;
+
+  ESP_LOGI(TAG, "Raw: %d, Voltage: %dmV, Moisture: %d%%", raw_value, voltage, moisture_percent);
+
+  return moisture_percent;
 }
 
-void app_main() {
-  // ADC configuration
-  adc1_config_width(ADC_WIDTH_BIT_12);
-  adc1_config_channel_atten((adc1_channel_t)channel, atten);
-  adc_chars = (esp_adc_cal_characteristics_t*)calloc(1, sizeof(esp_adc_cal_characteristics_t));
-  esp_adc_cal_characterize(unit, atten, ADC_WIDTH_BIT_12, DEFAULT_VREF, adc_chars);
-  mqtt_app_start();
+extern "C" void app_main(void) {
+  setup_adc();
+  ESP_LOGI(TAG, "Moisture sensor initialized");
 
   while (true) {
-    uint32_t adc_reading = 0;
-    for (int i = 0; i < NO_OF_SAMPLES; i++) {
-      adc_reading += adc1_get_raw((adc1_channel_t)channel);
-    }
-    adc_reading /= NO_OF_SAMPLES;
-    uint32_t voltage = esp_adc_cal_raw_to_voltage(adc_reading, adc_chars);
-
-    // Calculate moisture as a percentage
-    uint32_t moisture_percent = 100 * (voltage - DRY_VALUE) / (WET_VALUE - DRY_VALUE);
-    moisture_percent = (moisture_percent > 100) ? 100 : (moisture_percent < 0) ? 0 : moisture_percent;
-
-    printf("Voltage: %ldmV, Moisture Level: %ld%%\n", voltage, moisture_percent);
-    send_mqtt_message(moisture_percent);
-
-    vTaskDelay(pdMS_TO_TICKS(2000));
+  read_moisture_percent();
+  vTaskDelay(pdMS_TO_TICKS(2000));
   }
 }
