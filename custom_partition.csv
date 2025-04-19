@@ -1,0 +1,22 @@
+# Name,   Type, SubType, Offset,  Size, Flags
+
+# Non-volatile storage (e.g. Wi-Fi credentials)
+nvs,      data, nvs,     0x9000,   0x6000
+
+# PHY init data used by Wi-Fi/Bluetooth
+phy_init, data, phy,     0xf000,   0x1000
+
+# Factory application (default firmware)
+factory,  app,  factory, 0x10000,  1M
+
+# OTA update slot 0
+ota_0,    app,  ota_0,   0x110000, 1M
+
+# OTA update slot 1
+ota_1,    app,  ota_1,   0x210000, 1M
+
+# OTA metadata (active firmware info)
+otadata,  data, ota,     0x310000, 0x2000
+
+# SPIFFS filesystem (file storage)
+spiffs,   data, spiffs,  0x312000, 0xEE000
