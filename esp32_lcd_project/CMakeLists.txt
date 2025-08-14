@@ -3,7 +3,7 @@
 cmake_minimum_required(VERSION 3.16)
 
 # Include components
-set(EXTRA_COMPONENT_DIRS "components/lcd_driver" "components/button_handler")
+set(EXTRA_COMPONENT_DIRS "components/lcd_driver" "components/button_handler" "components/lvgl_port")
 
 include($ENV{IDF_PATH}/tools/cmake/project.cmake)
 project(esp32_lcd_project)

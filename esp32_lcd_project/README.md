@@ -1,18 +1,22 @@
 # ESP32-C3 Circular LCD Display Project
 
+[![Build ESP32-C3 LCD Project](https://github.com/YOUR_USERNAME/YOUR_REPO/actions/workflows/build.yml/badge.svg)](https://github.com/YOUR_USERNAME/YOUR_REPO/actions/workflows/build.yml)
+
 This is a boilerplate project for ESP32-C3 with a 1.28" 240x240 circular IPS LCD display (GC9A01 driver) and push button interface using ESP-IDF framework.
 
 ## Features
 
 - **Display Driver**: Optimized GC9A01 driver with hardware SPI
-- **Graphics Functions**: Basic drawing primitives (pixels, lines, rectangles, circles, text)
+- **LVGL Integration**: Full LVGL v8.3 graphics library support with optimized circular display rendering
+- **Graphics Functions**: Basic drawing primitives (pixels, lines, rectangles, circles, text) + LVGL widgets
 - **Button Handler**: Debounced input handling with support for press, release, and long-press events
 - **Interactive Menu System**: Navigate through different demos using push buttons
 - **Demo Screens**:
-  - Color Test Pattern
-  - Circle Drawing Demo
-  - Text Rendering Demo
+  - LVGL Home Menu with list navigation
+  - Animated Gauge/Meter Demo
+  - Settings Screen with interactive controls
   - System Information Display
+  - Legacy screens: Color Test, Circle Demo, Text Demo (available in main_basic.c)
 
 ## Hardware Requirements
 
@@ -57,10 +61,12 @@ This is a boilerplate project for ESP32-C3 with a 1.28" 240x240 circular IPS LCD
 ```
 esp32_lcd_project/
 ├── CMakeLists.txt              # Main CMake configuration
+├── idf_component.yml           # IDF Component Manager manifest (includes LVGL)
 ├── sdkconfig.defaults          # Default ESP32-C3 configuration
 ├── main/
 │   ├── CMakeLists.txt
-│   └── main.c                  # Main application code
+│   ├── main.c                  # Main application with LVGL
+│   └── main_basic.c            # Basic version without LVGL
 ├── components/
 │   ├── lcd_driver/             # LCD driver component
 │   │   ├── CMakeLists.txt
@@ -68,11 +74,22 @@ esp32_lcd_project/
 │   │   └── include/
 │   │       ├── lcd_driver.h
 │   │       └── font5x7.h       # Basic font data
-│   └── button_handler/         # Button handler component
+│   ├── button_handler/         # Button handler component
+│   │   ├── CMakeLists.txt
+│   │   ├── button_handler.c
+│   │   └── include/
+│   │       └── button_handler.h
+│   └── lvgl_port/              # LVGL port component
 │       ├── CMakeLists.txt
-│       ├── button_handler.c
+│       ├── lv_conf.h           # LVGL configuration
+│       ├── lvgl_port_display.c # Display driver for LVGL
+│       ├── lvgl_port_indev.c   # Input driver for LVGL
 │       └── include/
-│           └── button_handler.h
+│           ├── lvgl_port_display.h
+│           └── lvgl_port_indev.h
+├── .github/
+│   └── workflows/
+│       └── build.yml           # CI/CD pipeline
 └── README.md                   # This file
 ```
 
@@ -154,12 +171,25 @@ For buttons, you can modify the default configuration in `components/button_hand
 - **Button 1 (GPIO 0)**: Navigate menu items / Return to main menu
 - **Button 2 (GPIO 2)**: Select menu item / Confirm
 
-### Main Menu Options
+### Main Menu Options (LVGL Version)
 
-1. **Color Test**: Displays a 3x3 grid of different colors
-2. **Circle Demo**: Shows concentric circles and filled circles
-3. **Text Demo**: Demonstrates text rendering in different sizes
-4. **System Info**: Shows ESP32-C3 system information
+1. **Gauges Demo**: Animated circular meter with needle and indicators
+2. **Settings**: Interactive controls including brightness slider and switches
+3. **System Info**: Shows ESP32-C3 system information with LVGL version
+
+### Using the Basic Version (without LVGL)
+
+To use the basic version without LVGL:
+1. Rename `main/main.c` to `main/main_lvgl.c`
+2. Rename `main/main_basic.c` to `main/main.c`
+3. Remove `lvgl_port` from the REQUIRES in `main/CMakeLists.txt`
+4. Build and flash as normal
+
+The basic version includes:
+- Color Test Pattern
+- Circle Drawing Demo
+- Text Rendering Demo
+- System Information Display
 
 ### Adding Custom Screens
 
@@ -283,8 +313,57 @@ This project is provided as-is for educational and development purposes.
 
 Feel free to submit issues, fork the repository, and create pull requests for any improvements.
 
+## CI/CD Pipeline
+
+This project includes a GitHub Actions workflow that automatically builds the project on:
+- Push to `dev` branch
+- Pull requests to `main` branch
+
+### Workflow Features
+
+1. **Multi-version Build**: Tests compatibility with ESP-IDF v5.0.4 and v5.1.2
+2. **Code Quality Checks**: Basic static analysis and formatting checks
+3. **Build Artifacts**: Automatically uploads compiled binaries
+4. **Release Package**: Creates ready-to-flash firmware packages for PRs
+5. **PR Comments**: Adds build status and binary size information to PRs
+
+### Setting Up CI/CD
+
+1. Fork/clone this repository to your GitHub account
+2. Update the badge URL in README.md with your username and repository name
+3. Create `dev` and `main` branches if they don't exist
+4. Push code to `dev` branch or create PRs to `main` to trigger builds
+
+### Downloading Build Artifacts
+
+After a successful build:
+1. Go to the Actions tab in your GitHub repository
+2. Click on the workflow run
+3. Download artifacts from the bottom of the page
+4. Use the included `flash.sh` script or flash commands to program your ESP32-C3
+
+## LVGL Integration Details
+
+### Features
+- **Optimized Circular Display Support**: The display driver masks pixels outside the circular area
+- **Thread-Safe Operations**: Mutex protection for LVGL operations
+- **Button Navigation**: Two-button navigation system mapped to LVGL key events
+- **Dark Theme**: Default dark theme optimized for the display
+- **Smooth Animations**: Hardware-accelerated rendering with double buffering
+
+### Memory Usage
+- LVGL heap: 32KB (configurable in `lv_conf.h`)
+- Display buffers: 2 x ~11KB (1/10 screen size each)
+- Task stack: 4KB for LVGL task
+
+### Performance
+- Display refresh rate: 30 FPS (configurable)
+- SPI clock: 20 MHz (adjustable for performance/stability)
+- LVGL tick: Uses ESP timer for accurate timing
+
 ## Acknowledgments
 
 - ESP-IDF LCD component examples
 - GC9A01 datasheet and reference implementations
+- LVGL - Light and Versatile Graphics Library
 - ESP32-C3 community
