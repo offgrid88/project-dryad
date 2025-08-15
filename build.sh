@@ -1,24 +1,47 @@
 #!/bin/bash
 
-# Build script for ESP32-C6 project
+# ESP-IDF Build Script for Project Dryad
 
-echo "ESP32-C6 Project Build Script"
-echo "============================="
+echo "ESP-IDF Build Script for Project Dryad"
+echo "======================================"
 
-# Check if PlatformIO is installed
-if ! command -v pio &> /dev/null; then
-    echo "PlatformIO is not installed. Installing..."
-    pip install --user platformio
-    export PATH=$PATH:~/.local/bin
+# Check if IDF_PATH is set
+if [ -z "$IDF_PATH" ]; then
+    echo "Error: IDF_PATH is not set. Please set up ESP-IDF environment first."
+    echo "Run: source /path/to/esp-idf/export.sh"
+    exit 1
 fi
 
-# Build for ESP32-C6
-echo "Building for ESP32-C6..."
-pio run -e esp32c6
+# Default target
+TARGET=${1:-esp32c6}
 
-# Build for ESP32-C3 (optional)
-echo "Building for ESP32-C3..."
-pio run -e esp32_c3
+echo "Building for target: $TARGET"
 
-echo "Build complete!"
-echo "Firmware files are located in .pio/build/"
+# Clean previous build
+echo "Cleaning previous build..."
+idf.py fullclean
+
+# Set target
+echo "Setting target to $TARGET..."
+idf.py set-target $TARGET
+
+# Build the project
+echo "Building project..."
+idf.py build
+
+if [ $? -eq 0 ]; then
+    echo ""
+    echo "Build successful!"
+    echo "=================="
+    echo "Firmware files:"
+    echo "  - build/dryad.bin"
+    echo "  - build/bootloader/bootloader.bin"
+    echo "  - build/partition_table/partition-table.bin"
+    echo ""
+    echo "To flash: idf.py -p PORT flash"
+    echo "To monitor: idf.py -p PORT monitor"
+    echo "To flash and monitor: idf.py -p PORT flash monitor"
+else
+    echo "Build failed!"
+    exit 1
+fi
