@@ -1,0 +1,191 @@
+name: Advanced ESP32-C6 Build with ESP-IDF 5.5
+
+on:
+  push:
+    branches: [ main, master, develop ]
+    tags:
+      - 'v*'
+  pull_request:
+    branches: [ main, master, develop ]
+  workflow_dispatch:
+    inputs:
+      release_build:
+        description: 'Build for release'
+        required: false
+        type: boolean
+        default: false
+
+env:
+  ESP_IDF_VERSION: v5.5
+  TARGET: esp32c6
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        build_type: [debug, release]
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+      with:
+        submodules: recursive
+
+    - name: Cache ESP-IDF
+      id: cache-esp-idf
+      uses: actions/cache@v4
+      with:
+        path: |
+          ~/esp
+          ~/.espressif
+        key: ${{ runner.os }}-esp-idf-${{ env.ESP_IDF_VERSION }}-${{ env.TARGET }}
+        restore-keys: |
+          ${{ runner.os }}-esp-idf-${{ env.ESP_IDF_VERSION }}-
+          ${{ runner.os }}-esp-idf-
+
+    - name: Setup ESP-IDF
+      uses: espressif/setup-esp-idf@v1
+      with:
+        esp-idf-version: ${{ env.ESP_IDF_VERSION }}
+        targets: ${{ env.TARGET }}
+
+    - name: Cache build
+      uses: actions/cache@v4
+      with:
+        path: |
+          build
+          ~/.ccache
+        key: ${{ runner.os }}-build-${{ env.TARGET }}-${{ matrix.build_type }}-${{ hashFiles('**/CMakeLists.txt', '**/*.c', '**/*.h', '**/*.cpp', '**/*.hpp') }}
+        restore-keys: |
+          ${{ runner.os }}-build-${{ env.TARGET }}-${{ matrix.build_type }}-
+          ${{ runner.os }}-build-${{ env.TARGET }}-
+
+    - name: Configure build type
+      run: |
+        if [ "${{ matrix.build_type }}" = "release" ]; then
+          echo "CONFIG_COMPILER_OPTIMIZATION_SIZE=y" >> sdkconfig.defaults
+          echo "CONFIG_COMPILER_OPTIMIZATION_ASSERTIONS_SILENT=y" >> sdkconfig.defaults
+        else
+          echo "CONFIG_COMPILER_OPTIMIZATION_DEBUG=y" >> sdkconfig.defaults
+          echo "CONFIG_COMPILER_OPTIMIZATION_ASSERTIONS_ENABLE=y" >> sdkconfig.defaults
+        fi
+
+    - name: Build project
+      run: |
+        . ${IDF_PATH}/export.sh
+        idf.py build
+
+    - name: Run size analysis
+      run: |
+        . ${IDF_PATH}/export.sh
+        echo "## Size Information for ${{ matrix.build_type }} build" >> $GITHUB_STEP_SUMMARY
+        echo '```' >> $GITHUB_STEP_SUMMARY
+        idf.py size >> $GITHUB_STEP_SUMMARY
+        echo '```' >> $GITHUB_STEP_SUMMARY
+        echo "" >> $GITHUB_STEP_SUMMARY
+        echo "### Component sizes:" >> $GITHUB_STEP_SUMMARY
+        echo '```' >> $GITHUB_STEP_SUMMARY
+        idf.py size-components | head -20 >> $GITHUB_STEP_SUMMARY
+        echo '```' >> $GITHUB_STEP_SUMMARY
+
+    - name: Generate firmware info
+      run: |
+        . ${IDF_PATH}/export.sh
+        BUILD_DIR="build"
+        FW_VERSION=$(git describe --tags --always --dirty)
+        BUILD_TIME=$(date -u +"%Y-%m-%d %H:%M:%S UTC")
+        
+        cat > firmware_info.json << EOF
+        {
+          "version": "${FW_VERSION}",
+          "build_type": "${{ matrix.build_type }}",
+          "build_time": "${BUILD_TIME}",
+          "target": "${{ env.TARGET }}",
+          "idf_version": "${{ env.ESP_IDF_VERSION }}",
+          "sha": "${{ github.sha }}",
+          "files": {
+            "bootloader": "bootloader.bin",
+            "partition_table": "partition-table.bin",
+            "app": "$(basename $BUILD_DIR/*.bin | grep -v bootloader | grep -v partition)"
+          }
+        }
+        EOF
+        
+        cat firmware_info.json
+
+    - name: Package firmware
+      run: |
+        FW_VERSION=$(git describe --tags --always --dirty)
+        PACKAGE_NAME="esp32c6-firmware-${FW_VERSION}-${{ matrix.build_type }}"
+        mkdir -p ${PACKAGE_NAME}
+        
+        cp build/bootloader/bootloader.bin ${PACKAGE_NAME}/
+        cp build/partition_table/partition-table.bin ${PACKAGE_NAME}/
+        cp build/*.bin ${PACKAGE_NAME}/ 2>/dev/null || true
+        cp build/*.elf ${PACKAGE_NAME}/ 2>/dev/null || true
+        cp firmware_info.json ${PACKAGE_NAME}/
+        
+        # Create flash script
+        cat > ${PACKAGE_NAME}/flash.sh << 'EOF'
+        #!/bin/bash
+        PORT=${1:-/dev/ttyUSB0}
+        esptool.py -p $PORT -b 460800 --before default_reset --after hard_reset --chip esp32c6 \
+          write_flash --flash_mode dio --flash_size detect --flash_freq 80m \
+          0x0 bootloader.bin \
+          0x8000 partition-table.bin \
+          0x10000 *.bin
+        EOF
+        chmod +x ${PACKAGE_NAME}/flash.sh
+        
+        # Create README
+        cat > ${PACKAGE_NAME}/README.md << EOF
+        # ESP32-C6 Firmware
+        
+        Version: ${FW_VERSION}
+        Build Type: ${{ matrix.build_type }}
+        Target: ESP32-C6
+        ESP-IDF Version: ${{ env.ESP_IDF_VERSION }}
+        
+        ## Flashing Instructions
+        
+        ### Using flash.sh script:
+        \`\`\`bash
+        ./flash.sh /dev/ttyUSB0
+        \`\`\`
+        
+        ### Manual flash command:
+        \`\`\`bash
+        esptool.py -p /dev/ttyUSB0 -b 460800 --before default_reset --after hard_reset --chip esp32c6 \\
+          write_flash --flash_mode dio --flash_size detect --flash_freq 80m \\
+          0x0 bootloader.bin \\
+          0x8000 partition-table.bin \\
+          0x10000 *.bin
+        \`\`\`
+        EOF
+        
+        tar -czf ${PACKAGE_NAME}.tar.gz ${PACKAGE_NAME}
+        echo "PACKAGE_NAME=${PACKAGE_NAME}" >> $GITHUB_ENV
+
+    - name: Upload firmware package
+      uses: actions/upload-artifact@v4
+      with:
+        name: ${{ env.PACKAGE_NAME }}
+        path: ${{ env.PACKAGE_NAME }}.tar.gz
+        retention-days: 30
+
+    - name: Create release
+      if: startsWith(github.ref, 'refs/tags/') && matrix.build_type == 'release'
+      uses: softprops/action-gh-release@v1
+      with:
+        files: ${{ env.PACKAGE_NAME }}.tar.gz
+        body: |
+          ESP32-C6 Firmware Release
+          
+          - Target: ESP32-C6
+          - ESP-IDF Version: ${{ env.ESP_IDF_VERSION }}
+          - Build Type: ${{ matrix.build_type }}
+          
+          See firmware_info.json in the package for detailed information.
+        draft: false
+        prerelease: false
