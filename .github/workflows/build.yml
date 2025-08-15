@@ -2,9 +2,9 @@ name: Build ESP32-C6 ESP-IDF Project
 
 on:
   push:
-    branches: [ main, master, develop ]
+    branches: [ main, master, dev ]
   pull_request:
-    branches: [ main, master, develop ]
+    branches: [ main, master, dev ]
   workflow_dispatch:
 
 jobs:
