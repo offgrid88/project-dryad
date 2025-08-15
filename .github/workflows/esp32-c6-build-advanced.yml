@@ -2,11 +2,11 @@ name: Advanced ESP32-C6 Build with ESP-IDF 5.5
 
 on:
   push:
-    branches: [ main, master, develop ]
+    branches: [ main, master, develop, dev ]
     tags:
       - 'v*'
   pull_request:
-    branches: [ main, master, develop ]
+    branches: [ main, master, develop, dev ]
   workflow_dispatch:
     inputs:
       release_build:
