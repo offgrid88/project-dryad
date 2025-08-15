@@ -15,7 +15,7 @@ static const char *TAG = "moisture_sensor";
 // For ESP32-C6, ADC1 channels are available on specific GPIOs
 #define ADC_UNIT        ADC_UNIT_1
 #define ADC_CHANNEL     ADC_CHANNEL_0   // GPIO0 for ESP32-C6
-#define ADC_ATTEN       ADC_ATTEN_DB_11  // Use DB_11 for ESP-IDF v5.1
+#define ADC_ATTEN       ADC_ATTEN_DB_12  // Available in ESP-IDF 5.5
 
 static adc_oneshot_unit_handle_t adc1_handle;
 static adc_cali_handle_t adc_cali_handle = NULL;
@@ -36,6 +36,7 @@ void setup_adc(void) {
     ESP_ERROR_CHECK(adc_oneshot_config_channel(adc1_handle, ADC_CHANNEL, &config));
 
     // Try to calibrate ADC using line fitting for ESP32-C6
+    // ESP32-C6 only supports line fitting calibration scheme
     adc_cali_line_fitting_config_t cali_config = {
         .unit_id = ADC_UNIT,
         .atten = ADC_ATTEN,

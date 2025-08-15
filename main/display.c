@@ -6,6 +6,7 @@
 static const char *TAG = "display";
 
 void display_task(void* pvParameters) {
+    ESP_LOGI(TAG, "Display task started");
     // TODO: setup i2c
 
     while (1) {
