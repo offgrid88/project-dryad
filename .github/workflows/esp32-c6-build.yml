@@ -1,60 +1,81 @@
-name: Build ESP32-C6 with ESP-IDF 5.5
+name: ESP32-C6 Build
 
 on:
   push:
-    branches: [ main, master, develop, dev ]
+    branches: [ main, dev ]
   pull_request:
-    branches: [ main, master, develop, dev ]
-  workflow_dispatch:
+    branches: [ main, dev ]
 
 jobs:
   build:
+    name: Build ESP32-C6 Firmware
     runs-on: ubuntu-latest
     
     steps:
     - name: Checkout code
       uses: actions/checkout@v4
       with:
-        submodules: recursive
-
+        submodules: 'recursive'
+    
     - name: Setup ESP-IDF
-      uses: espressif/setup-esp-idf@v1
+      uses: espressif/esp-idf-ci-action@v1
       with:
-        esp-idf-version: v5.5
-        targets: esp32c6
-
-    - name: Build project
+        esp_idf_version: v5.2
+        target: esp32c6
+        path: '.'
+    
+    - name: Build firmware
       run: |
-        . ${IDF_PATH}/export.sh
+        . $IDF_PATH/export.sh
         idf.py build
-
-    - name: Upload build artifacts
+    
+    - name: Upload firmware artifacts
       uses: actions/upload-artifact@v4
       with:
-        name: esp32-c6-firmware
+        name: esp32c6-firmware-${{ github.sha }}
         path: |
-          build/bootloader/bootloader.bin
+          build/dryad.bin
+          build/dryad.elf
           build/partition_table/partition-table.bin
-          build/*.bin
-          build/*.elf
-          build/*.map
+          build/bootloader/bootloader.bin
+          build/flash_args
         retention-days: 30
-
-    - name: Check binary size
-      run: |
-        . ${IDF_PATH}/export.sh
-        idf.py size
-        idf.py size-components
-
+    
     - name: Generate flash instructions
       run: |
-        echo "Flash command:" > flash_instructions.txt
-        echo "esptool.py -p PORT -b 460800 --before default_reset --after hard_reset --chip esp32c6 write_flash --flash_mode dio --flash_size detect --flash_freq 80m 0x0 build/bootloader/bootloader.bin 0x8000 build/partition_table/partition-table.bin 0x10000 build/*.bin" >> flash_instructions.txt
-        cat flash_instructions.txt
-
+        echo "# ESP32-C6 Firmware Flash Instructions" > flash_instructions.md
+        echo "" >> flash_instructions.md
+        echo "## Option 1: Using esptool.py" >> flash_instructions.md
+        echo '```bash' >> flash_instructions.md
+        echo "esptool.py -p PORT -b 460800 --before default_reset --after hard_reset write_flash @flash_args" >> flash_instructions.md
+        echo '```' >> flash_instructions.md
+        echo "" >> flash_instructions.md
+        echo "## Option 2: Using ESP-IDF" >> flash_instructions.md
+        echo '```bash' >> flash_instructions.md
+        echo "idf.py -p PORT flash" >> flash_instructions.md
+        echo '```' >> flash_instructions.md
+        echo "" >> flash_instructions.md
+        echo "Replace PORT with your serial port (e.g., /dev/ttyUSB0 or COM3)" >> flash_instructions.md
+    
     - name: Upload flash instructions
       uses: actions/upload-artifact@v4
       with:
-        name: flash-instructions
-        path: flash_instructions.txt
+        name: flash-instructions-${{ github.sha }}
+        path: flash_instructions.md
         retention-days: 30
+
+    - name: Create Release (on main branch only)
+      if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+      uses: softprops/action-gh-release@v1
+      with:
+        tag_name: v${{ github.run_number }}
+        name: Build ${{ github.run_number }}
+        draft: false
+        prerelease: true
+        files: |
+          build/dryad.bin
+          build/partition_table/partition-table.bin
+          build/bootloader/bootloader.bin
+          flash_instructions.md
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

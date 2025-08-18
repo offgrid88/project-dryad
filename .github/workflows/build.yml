@@ -1,37 +1,42 @@
-name: Build ESP32-C6 ESP-IDF Project
+name: Build Dryad Firmware
 
 on:
   push:
-    branches: [ main, master, dev ]
+    branches: [ main, dev ]
   pull_request:
-    branches: [ main, master, dev ]
+    branches: [ main, dev ]
   workflow_dispatch:
 
 jobs:
   build:
+    name: Build for ${{ matrix.target }}
     runs-on: ubuntu-latest
     
     strategy:
       matrix:
-        idf_version: ["5.1", "5.2"]
-        target: ["esp32c6", "esp32c3"]
+        include:
+          - target: esp32c6
+            idf_version: "5.2"
+          - target: esp32c3
+            idf_version: "5.2"
     
     steps:
-    - uses: actions/checkout@v4
+    - name: Checkout code
+      uses: actions/checkout@v4
       with:
         submodules: 'recursive'
     
-    - name: ESP-IDF Build
+    - name: Build with ESP-IDF
       uses: espressif/esp-idf-ci-action@v1
       with:
         esp_idf_version: v${{ matrix.idf_version }}
         target: ${{ matrix.target }}
         path: '.'
     
-    - name: Upload firmware
+    - name: Upload firmware artifacts
       uses: actions/upload-artifact@v4
       with:
-        name: firmware-${{ matrix.target }}-idf${{ matrix.idf_version }}
+        name: firmware-${{ matrix.target }}
         path: |
           build/dryad.bin
           build/dryad.elf
@@ -40,17 +45,23 @@ jobs:
           build/flash_args
         retention-days: 30
     
-    - name: Create flash command file
+    - name: Generate flash instructions
       run: |
-        echo "Flash command for ${{ matrix.target }}:" > flash_instructions.txt
-        echo "esptool.py -p PORT -b 460800 --before default_reset --after hard_reset write_flash @flash_args" >> flash_instructions.txt
-        echo "" >> flash_instructions.txt
-        echo "Or use idf.py:" >> flash_instructions.txt
-        echo "idf.py -p PORT flash" >> flash_instructions.txt
+        echo "# Firmware Flash Instructions for ${{ matrix.target }}" > flash_instructions.md
+        echo "" >> flash_instructions.md
+        echo "## Using esptool.py:" >> flash_instructions.md
+        echo '```bash' >> flash_instructions.md
+        echo "esptool.py -p PORT -b 460800 --before default_reset --after hard_reset write_flash @flash_args" >> flash_instructions.md
+        echo '```' >> flash_instructions.md
+        echo "" >> flash_instructions.md
+        echo "## Using ESP-IDF:" >> flash_instructions.md
+        echo '```bash' >> flash_instructions.md
+        echo "idf.py -p PORT flash" >> flash_instructions.md
+        echo '```' >> flash_instructions.md
     
     - name: Upload flash instructions
       uses: actions/upload-artifact@v4
       with:
-        name: flash-instructions-${{ matrix.target }}-idf${{ matrix.idf_version }}
-        path: flash_instructions.txt
+        name: flash-instructions-${{ matrix.target }}
+        path: flash_instructions.md
         retention-days: 30

@@ -1,0 +1,52 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 200 200" width="200" height="200">
+  <!-- Background circle -->
+  <circle cx="100" cy="100" r="90" fill="#e8f5e9" stroke="#2e7d32" stroke-width="2"/>
+  
+  <!-- Tree/Plant design -->
+  <!-- Trunk -->
+  <rect x="95" y="120" width="10" height="40" fill="#6d4c41" rx="2"/>
+  
+  <!-- Main leaves/branches -->
+  <g transform="translate(100, 100)">
+    <!-- Center leaf -->
+    <path d="M 0,-30 Q -10,-20 -8,-10 Q -5,0 0,0 Q 5,0 8,-10 Q 10,-20 0,-30" fill="#4caf50"/>
+    
+    <!-- Left branch -->
+    <g transform="rotate(-30)">
+      <path d="M 0,-25 Q -8,-18 -6,-10 Q -4,0 0,0 Q 4,0 6,-10 Q 8,-18 0,-25" fill="#66bb6a"/>
+    </g>
+    
+    <!-- Right branch -->
+    <g transform="rotate(30)">
+      <path d="M 0,-25 Q -8,-18 -6,-10 Q -4,0 0,0 Q 4,0 6,-10 Q 8,-18 0,-25" fill="#66bb6a"/>
+    </g>
+    
+    <!-- Left-left branch -->
+    <g transform="rotate(-60)">
+      <path d="M 0,-20 Q -6,-15 -5,-8 Q -3,0 0,0 Q 3,0 5,-8 Q 6,-15 0,-20" fill="#81c784"/>
+    </g>
+    
+    <!-- Right-right branch -->
+    <g transform="rotate(60)">
+      <path d="M 0,-20 Q -6,-15 -5,-8 Q -3,0 0,0 Q 3,0 5,-8 Q 6,-15 0,-20" fill="#81c784"/>
+    </g>
+  </g>
+  
+  <!-- IoT sensor dots -->
+  <circle cx="85" cy="85" r="3" fill="#1976d2"/>
+  <circle cx="115" cy="85" r="3" fill="#1976d2"/>
+  <circle cx="100" cy="70" r="3" fill="#1976d2"/>
+  
+  <!-- Connection lines -->
+  <line x1="85" y1="85" x2="100" y2="70" stroke="#1976d2" stroke-width="1" opacity="0.5"/>
+  <line x1="115" y1="85" x2="100" y2="70" stroke="#1976d2" stroke-width="1" opacity="0.5"/>
+  <line x1="85" y1="85" x2="115" y2="85" stroke="#1976d2" stroke-width="1" opacity="0.5"/>
+  
+  <!-- Soil/roots indication -->
+  <path d="M 70,160 Q 80,165 90,160 L 95,160 L 105,160 Q 120,165 130,160" 
+        fill="none" stroke="#8d6e63" stroke-width="2" opacity="0.7"/>
+  
+  <!-- Project name -->
+  <text x="100" y="185" font-family="Arial, sans-serif" font-size="18" font-weight="bold" 
+        text-anchor="middle" fill="#2e7d32">DRYAD</text>
+</svg>
