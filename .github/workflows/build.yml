@@ -1,56 +1,115 @@
-name: Build ESP32-C6 ESP-IDF Project
+name: Build ESP32-C6 Firmware
 
 on:
   push:
-    branches: [ main, master, dev ]
+    branches: [ main, dev ]
   pull_request:
-    branches: [ main, master, dev ]
+    branches: [ main, dev ]
   workflow_dispatch:
+
+env:
+  IDF_VERSION: v5.5
+  TARGET: esp32c6
 
 jobs:
   build:
+    name: Build ESP32-C6
     runs-on: ubuntu-latest
     
-    strategy:
-      matrix:
-        idf_version: ["5.1", "5.2"]
-        target: ["esp32c6", "esp32c3"]
-    
     steps:
-    - uses: actions/checkout@v4
+    - name: Checkout code
+      uses: actions/checkout@v4
       with:
         submodules: 'recursive'
     
-    - name: ESP-IDF Build
+    - name: Build ESP-IDF Project
       uses: espressif/esp-idf-ci-action@v1
       with:
-        esp_idf_version: v${{ matrix.idf_version }}
-        target: ${{ matrix.target }}
+        esp_idf_version: ${{ env.IDF_VERSION }}
+        target: ${{ env.TARGET }}
         path: '.'
     
-    - name: Upload firmware
+    - name: Create build info
+      run: |
+        echo "Build Information" > build_info.txt
+        echo "=================" >> build_info.txt
+        echo "Date: $(date)" >> build_info.txt
+        echo "Commit: ${{ github.sha }}" >> build_info.txt
+        echo "Branch: ${{ github.ref_name }}" >> build_info.txt
+        echo "ESP-IDF Version: ${{ env.IDF_VERSION }}" >> build_info.txt
+        echo "Target: ${{ env.TARGET }}" >> build_info.txt
+    
+    - name: Upload firmware artifacts
       uses: actions/upload-artifact@v4
       with:
-        name: firmware-${{ matrix.target }}-idf${{ matrix.idf_version }}
+        name: esp32c6-firmware-${{ github.run_number }}
         path: |
           build/dryad.bin
           build/dryad.elf
           build/partition_table/partition-table.bin
           build/bootloader/bootloader.bin
           build/flash_args
+          build_info.txt
         retention-days: 30
     
-    - name: Create flash command file
+    - name: Generate flash instructions
       run: |
-        echo "Flash command for ${{ matrix.target }}:" > flash_instructions.txt
-        echo "esptool.py -p PORT -b 460800 --before default_reset --after hard_reset write_flash @flash_args" >> flash_instructions.txt
-        echo "" >> flash_instructions.txt
-        echo "Or use idf.py:" >> flash_instructions.txt
-        echo "idf.py -p PORT flash" >> flash_instructions.txt
+        echo "# ESP32-C6 Flash Instructions" > flash_instructions.md
+        echo "" >> flash_instructions.md
+        echo "## Quick Flash (using flash_args)" >> flash_instructions.md
+        echo '```bash' >> flash_instructions.md
+        echo "esptool.py -p PORT -b 460800 --before default_reset --after hard_reset write_flash @flash_args" >> flash_instructions.md
+        echo '```' >> flash_instructions.md
+        echo "" >> flash_instructions.md
+        echo "## Manual Flash" >> flash_instructions.md
+        echo '```bash' >> flash_instructions.md
+        echo "esptool.py -p PORT -b 460800 --chip esp32c6 \\" >> flash_instructions.md
+        echo "  --before default_reset --after hard_reset write_flash \\" >> flash_instructions.md
+        echo "  0x0 bootloader.bin \\" >> flash_instructions.md
+        echo "  0x8000 partition-table.bin \\" >> flash_instructions.md
+        echo "  0x10000 dryad.bin" >> flash_instructions.md
+        echo '```' >> flash_instructions.md
+        echo "" >> flash_instructions.md
+        echo "## Using ESP-IDF" >> flash_instructions.md
+        echo '```bash' >> flash_instructions.md
+        echo "idf.py -p PORT flash" >> flash_instructions.md
+        echo '```' >> flash_instructions.md
+        echo "" >> flash_instructions.md
+        echo "Replace PORT with your serial port (e.g., /dev/ttyUSB0, /dev/ttyACM0, or COM3)" >> flash_instructions.md
     
     - name: Upload flash instructions
       uses: actions/upload-artifact@v4
       with:
-        name: flash-instructions-${{ matrix.target }}-idf${{ matrix.idf_version }}
-        path: flash_instructions.txt
+        name: flash-instructions-${{ github.run_number }}
+        path: flash_instructions.md
         retention-days: 30
+    
+    # Create release for main branch pushes
+    - name: Create Release
+      if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+      uses: softprops/action-gh-release@v1
+      with:
+        tag_name: build-${{ github.run_number }}
+        name: "Build #${{ github.run_number }} - ESP32-C6"
+        draft: false
+        prerelease: true
+        body: |
+          Automated build of Dryad firmware for ESP32-C6
+          
+          **Build Details:**
+          - Commit: ${{ github.sha }}
+          - ESP-IDF Version: ${{ env.IDF_VERSION }}
+          - Target: ${{ env.TARGET }}
+          
+          **Files:**
+          - `dryad.bin` - Main application
+          - `bootloader.bin` - Bootloader
+          - `partition-table.bin` - Partition table
+          - `flash_instructions.md` - Flashing instructions
+        files: |
+          build/dryad.bin
+          build/partition_table/partition-table.bin
+          build/bootloader/bootloader.bin
+          flash_instructions.md
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
