@@ -85,31 +85,3 @@ jobs:
         retention-days: 30
     
     # Create release for main branch pushes
-    - name: Create Release
-      if: github.ref == 'refs/heads/main' && github.event_name == 'push'
-      uses: softprops/action-gh-release@v1
-      with:
-        tag_name: build-${{ github.run_number }}
-        name: "Build #${{ github.run_number }} - ESP32-C6"
-        draft: false
-        prerelease: true
-        body: |
-          Automated build of Dryad firmware for ESP32-C6
-          
-          **Build Details:**
-          - Commit: ${{ github.sha }}
-          - ESP-IDF Version: ${{ env.IDF_VERSION }}
-          - Target: ${{ env.TARGET }}
-          
-          **Files:**
-          - `dryad.bin` - Main application
-          - `bootloader.bin` - Bootloader
-          - `partition-table.bin` - Partition table
-          - `flash_instructions.md` - Flashing instructions
-        files: |
-          build/dryad.bin
-          build/partition_table/partition-table.bin
-          build/bootloader/bootloader.bin
-          flash_instructions.md
-      env:
-        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
