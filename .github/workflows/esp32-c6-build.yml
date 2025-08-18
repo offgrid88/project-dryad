@@ -20,7 +20,7 @@ jobs:
     - name: Setup ESP-IDF
       uses: espressif/esp-idf-ci-action@v1
       with:
-        esp_idf_version: v5.2
+        esp_idf_version: v5.5
         target: esp32c6
         path: '.'
     

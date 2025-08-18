@@ -7,7 +7,7 @@
 
 [![Build ESP32-C6](https://github.com/YOUR_USERNAME/dryad/actions/workflows/build.yml/badge.svg)](https://github.com/YOUR_USERNAME/dryad/actions/workflows/build.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
-[![ESP-IDF](https://img.shields.io/badge/ESP--IDF-v5.1%20%7C%20v5.2-blue)](https://github.com/espressif/esp-idf)
+[![ESP-IDF](https://img.shields.io/badge/ESP--IDF-v5.5-blue)](https://github.com/espressif/esp-idf)
 
 </div>
 
@@ -37,7 +37,7 @@ Project Dryad is an IoT plant monitoring system that keeps your plants healthy b
 ## 📦 Quick Start
 
 ### Prerequisites
-- [ESP-IDF v5.1 or v5.2](https://docs.espressif.com/projects/esp-idf/en/latest/esp32/get-started/)
+- [ESP-IDF v5.5](https://docs.espressif.com/projects/esp-idf/en/latest/esp32/get-started/)
 - Python 3.8+
 - Git
 
@@ -90,7 +90,7 @@ Key settings:
 
 ## 🚀 CI/CD
 
-GitHub Actions automatically builds firmware for both ESP32-C6 and ESP32-C3 on every push to `main` or `dev` branches. Build artifacts are available in the Actions tab.
+GitHub Actions automatically builds firmware for both ESP32-C6 and ESP32-C3 using ESP-IDF v5.5 on every push to `main` or `dev` branches. Build artifacts are available in the Actions tab.
 
 ## 📤 Flashing Firmware
 
