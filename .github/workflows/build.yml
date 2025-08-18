@@ -22,17 +22,12 @@ jobs:
       with:
         submodules: 'recursive'
     
-    - name: Setup ESP-IDF
+    - name: Build ESP-IDF Project
       uses: espressif/esp-idf-ci-action@v1
       with:
         esp_idf_version: ${{ env.IDF_VERSION }}
         target: ${{ env.TARGET }}
         path: '.'
-    
-    - name: Build firmware
-      run: |
-        . $IDF_PATH/export.sh
-        idf.py build
     
     - name: Create build info
       run: |
