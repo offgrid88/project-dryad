@@ -15,7 +15,7 @@ static const char *TAG = "moisture_sensor";
 // For ESP32-C6, ADC1 channels are available on specific GPIOs
 #define ADC_UNIT        ADC_UNIT_1
 #define ADC_CHANNEL     ADC_CHANNEL_0   // GPIO0 for ESP32-C6
-#define ADC_ATTEN       ADC_ATTEN_DB_11  // 11dB attenuation (0-3.3V range)
+#define ADC_ATTEN       ADC_ATTEN_DB_12  // 12dB attenuation (0-3.3V range)
 
 static adc_oneshot_unit_handle_t adc1_handle;
 static adc_cali_handle_t adc_cali_handle = NULL;
