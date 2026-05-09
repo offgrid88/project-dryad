@@ -1,6 +1,7 @@
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 #include "moisture_sensor.h"
+#include "display.h"
 #include "esp_adc/adc_oneshot.h"
 #include "esp_adc/adc_cali.h"
 #include "esp_adc/adc_cali_scheme.h"
@@ -100,7 +101,8 @@ void moisture_sensor_task(void* pvParameters) {
     ESP_LOGI(TAG, "Moisture sensor initialized");
 
     while (1) {
-        read_moisture_percent();
+        int pct = read_moisture_percent();
+        display_set_moisture(pct);
         vTaskDelay(pdMS_TO_TICKS(2000));
     }
 }
