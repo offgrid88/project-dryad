@@ -2,7 +2,7 @@ name: Build Firmware
 
 on:
   push:
-    branches: [ main, dev, 'feature/**' ]
+    branches: [ main, dev ]
   pull_request:
     branches: [ main, dev ]
   workflow_dispatch:
