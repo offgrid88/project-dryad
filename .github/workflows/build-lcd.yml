@@ -1,0 +1,58 @@
+name: Build ESP32-C3 LCD Project
+
+on:
+  push:
+    branches: [ main, dev ]
+    paths:
+      - 'esp32_lcd_project/**'
+      - '.github/workflows/build-lcd.yml'
+  pull_request:
+    branches: [ main ]
+    paths:
+      - 'esp32_lcd_project/**'
+  workflow_dispatch:
+
+env:
+  IDF_VERSION: v5.5
+  TARGET: esp32c3
+
+jobs:
+  build:
+    name: Build ESP32-C3 LCD
+    runs-on: ubuntu-latest
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+      with:
+        submodules: 'recursive'
+
+    - name: Build ESP-IDF Project
+      uses: espressif/esp-idf-ci-action@v1
+      with:
+        esp_idf_version: ${{ env.IDF_VERSION }}
+        target: ${{ env.TARGET }}
+        path: 'esp32_lcd_project'
+
+    - name: Upload firmware artifacts
+      uses: actions/upload-artifact@v4
+      with:
+        name: esp32c3-lcd-firmware-${{ github.run_number }}
+        path: |
+          esp32_lcd_project/build/bootloader/bootloader.bin
+          esp32_lcd_project/build/partition_table/partition-table.bin
+          esp32_lcd_project/build/*.bin
+          esp32_lcd_project/build/*.elf
+          esp32_lcd_project/build/flash_args
+        retention-days: 30
+
+    - name: Upload build logs on failure
+      if: failure()
+      uses: actions/upload-artifact@v4
+      with:
+        name: build-logs-lcd-${{ github.run_number }}
+        path: |
+          esp32_lcd_project/build/log/*
+          esp32_lcd_project/build/CMakeFiles/CMakeOutput.log
+          esp32_lcd_project/build/CMakeFiles/CMakeError.log
+        retention-days: 3
