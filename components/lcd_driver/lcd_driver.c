@@ -1,430 +1,251 @@
 /**
  * @file lcd_driver.c
- * @brief GC9A01 LCD driver implementation for ESP32-C3
+ * @brief ST7789 via i8080 8-bit parallel interface — WT32S3-28S PRO
+ *
+ * Pin mapping from datasheet Table 3:
+ *   BL_PWM   → GPIO 47   (backlight PWM, high = on)
+ *   LCD_RESET→ GPIO  3   (shared with touch reset)
+ *   LCD_RS   → GPIO 18   (DC: low = cmd, high = data)
+ *   LCD_WR   → GPIO 17   (write strobe)
+ *   DB0..DB7 → GPIO 16,40,15,7,41,42,2,1
  */
 
 #include <string.h>
-#include <stdlib.h>
+#include <math.h>
 #include "lcd_driver.h"
 #include "esp_log.h"
-#include "esp_lcd_panel_io.h"
-#include "esp_lcd_panel_vendor.h"
-#include "esp_lcd_panel_ops.h"
-#include "driver/spi_master.h"
-#include "driver/gpio.h"
-#include "driver/ledc.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 
-// Basic 5x7 font data
-#include "font5x7.h"
-
 static const char *TAG = "LCD_DRIVER";
 
-// Pin configuration
-#define LCD_HOST          SPI2_HOST
-#define LCD_PIXEL_CLOCK_HZ (20 * 1000 * 1000)
-#define LCD_BK_LIGHT_ON_LEVEL  1
-#define LCD_BK_LIGHT_OFF_LEVEL !LCD_BK_LIGHT_ON_LEVEL
+/* ============================================================
+ * ESP32-S3 — full i8080 implementation
+ * ============================================================ */
+#if CONFIG_IDF_TARGET_ESP32S3
 
-// GPIO pins - adjust these according to your hardware setup
-#define PIN_NUM_MOSI      7   // SDA on LCD
-#define PIN_NUM_CLK       6   // SCL on LCD
-#define PIN_NUM_CS        10
-#define PIN_NUM_DC        8   // DC/RS on LCD
-#define PIN_NUM_RST       4   // RES on LCD
-#define PIN_NUM_BK_LIGHT  5   // Backlight control (optional)
+#include "esp_lcd_panel_io.h"
+#include "esp_lcd_panel_vendor.h"
+#include "esp_lcd_panel_ops.h"
+#include "driver/gpio.h"
+#include "driver/ledc.h"
+#include "rom/ets_sys.h"
 
-// LCD dimensions
-#define LCD_H_RES         240
-#define LCD_V_RES         240
+/* WT32S3-28S PRO verified pin assignments */
+#define PIN_BL       47
+#define PIN_RST       3
+#define PIN_DC       18   /* LCD_RS = DC/RS */
+#define PIN_WR       17   /* LCD_WR = write strobe */
+#define PIN_DB0      16
+#define PIN_DB1      40
+#define PIN_DB2      15
+#define PIN_DB3       7
+#define PIN_DB4      41
+#define PIN_DB5      42
+#define PIN_DB6       2
+#define PIN_DB7       1
 
-// LCD panel handles
-static esp_lcd_panel_io_handle_t io_handle = NULL;
-static esp_lcd_panel_handle_t panel_handle = NULL;
+#define LCD_H_RES    240
+#define LCD_V_RES    320
+#define LCD_CLK_HZ   (5 * 1000 * 1000)
 
-// Frame buffer for faster operations (optional)
-static uint16_t *frame_buffer = NULL;
-static size_t fb_size = 0;
+static esp_lcd_i80_bus_handle_t  s_i80_bus     = NULL;
+static esp_lcd_panel_io_handle_t s_io_handle   = NULL;
+static esp_lcd_panel_handle_t    s_panel       = NULL;
 
-/**
- * Initialize the backlight PWM
- */
-static esp_err_t init_backlight(void)
+static void backlight_init(void)
 {
-#ifdef PIN_NUM_BK_LIGHT
-    // Configure LEDC for backlight control
-    ledc_timer_config_t ledc_timer = {
-        .speed_mode       = LEDC_LOW_SPEED_MODE,
-        .timer_num        = LEDC_TIMER_0,
-        .duty_resolution  = LEDC_TIMER_13_BIT,
-        .freq_hz          = 5000,
-        .clk_cfg          = LEDC_AUTO_CLK
+    /* Drive backlight GPIO high directly — simpler than LEDC and easier to debug */
+    gpio_config_t bl = {
+        .pin_bit_mask = (1ULL << PIN_BL),
+        .mode         = GPIO_MODE_OUTPUT,
+        .pull_up_en   = GPIO_PULLUP_DISABLE,
+        .pull_down_en = GPIO_PULLDOWN_DISABLE,
+        .intr_type    = GPIO_INTR_DISABLE,
     };
-    ESP_ERROR_CHECK(ledc_timer_config(&ledc_timer));
+    gpio_config(&bl);
+    gpio_set_level(PIN_BL, 1);
+    ESP_LOGI(TAG, "Backlight on GPIO %d (HIGH)", PIN_BL);
+}
 
-    ledc_channel_config_t ledc_channel = {
-        .speed_mode     = LEDC_LOW_SPEED_MODE,
-        .channel        = LEDC_CHANNEL_0,
-        .timer_sel      = LEDC_TIMER_0,
-        .intr_type      = LEDC_INTR_DISABLE,
-        .gpio_num       = PIN_NUM_BK_LIGHT,
-        .duty           = 4096, // 50% duty cycle
-        .hpoint         = 0
+esp_err_t lcd_init(void)
+{
+    ESP_LOGI(TAG, "Init i8080 8-bit parallel bus");
+
+    esp_lcd_i80_bus_config_t bus_cfg = {
+        .clk_src     = LCD_CLK_SRC_DEFAULT,
+        .wr_gpio_num = PIN_WR,
+        .dc_gpio_num = PIN_DC,
+        .bus_width   = 8,
+        .data_gpio_nums = {
+            PIN_DB0, PIN_DB1, PIN_DB2, PIN_DB3,
+            PIN_DB4, PIN_DB5, PIN_DB6, PIN_DB7,
+        },
+        .max_transfer_bytes = LCD_H_RES * LCD_V_RES * sizeof(uint16_t),
     };
-    ESP_ERROR_CHECK(ledc_channel_config(&ledc_channel));
-#endif
+    ESP_ERROR_CHECK(esp_lcd_new_i80_bus(&bus_cfg, &s_i80_bus));
+
+    esp_lcd_panel_io_i80_config_t io_cfg = {
+        .cs_gpio_num       = -1,   /* CS tied low on the board */
+        .pclk_hz           = LCD_CLK_HZ,
+        .trans_queue_depth = 10,
+        .dc_levels = {
+            .dc_idle_level  = 0,
+            .dc_cmd_level   = 0,
+            .dc_dummy_level = 0,
+            .dc_data_level  = 1,
+        },
+        .flags = {
+            /* swap_color_bytes=0: DMA sends bytes in memory order (LSB first).
+             * data_endian=LITTLE (see panel_cfg below) tells the ST7789 via
+             * RAMCTRL to expect LSB first, so no software swap is needed. */
+            .swap_color_bytes = 0,
+        },
+        .lcd_cmd_bits   = 8,
+        .lcd_param_bits = 8,
+    };
+    ESP_ERROR_CHECK(esp_lcd_new_panel_io_i80(s_i80_bus, &io_cfg, &s_io_handle));
+
+    ESP_LOGI(TAG, "Install ST7789 panel driver");
+    esp_lcd_panel_dev_config_t panel_cfg = {
+        .reset_gpio_num = PIN_RST,
+        .rgb_endian     = LCD_RGB_ENDIAN_RGB,
+        /* Tell ST7789 (via RAMCTRL) the host sends LSB first.
+         * The ESP32-S3 DMA sends buffer bytes in address order (low addr = low byte = LSB first).
+         * Default is BIG endian (MSB first) which mismatches — this fixes it. */
+        .data_endian    = LCD_RGB_DATA_ENDIAN_LITTLE,
+        .bits_per_pixel = 16,
+    };
+    ESP_ERROR_CHECK(esp_lcd_new_panel_st7789(s_io_handle, &panel_cfg, &s_panel));
+
+    ESP_ERROR_CHECK(esp_lcd_panel_reset(s_panel));
+    ESP_ERROR_CHECK(esp_lcd_panel_init(s_panel));
+    ESP_ERROR_CHECK(esp_lcd_panel_invert_color(s_panel, true));
+    ESP_ERROR_CHECK(esp_lcd_panel_set_gap(s_panel, 0, 0));
+    ESP_ERROR_CHECK(esp_lcd_panel_disp_on_off(s_panel, true));
+
+    backlight_init();
+    /* Do NOT call lcd_clear here — its async DMA transfers would fire on_trans_done
+     * after the LVGL semaphore callback is registered, creating a stale give that
+     * causes disp_flush to skip the first tile's synchronisation.
+     * LVGL renders its own background immediately after init. */
+    ESP_LOGI(TAG, "LCD ready (%dx%d)", LCD_H_RES, LCD_V_RES);
     return ESP_OK;
 }
 
-/**
- * Initialize the LCD
- */
-esp_err_t lcd_init(void)
+void lcd_draw_bitmap(int x1, int y1, int x2, int y2, const void *data)
 {
-    esp_err_t ret = ESP_OK;
-    
-    ESP_LOGI(TAG, "Initialize SPI bus");
-    spi_bus_config_t buscfg = {
-        .mosi_io_num = PIN_NUM_MOSI,
-        .miso_io_num = -1,
-        .sclk_io_num = PIN_NUM_CLK,
-        .quadwp_io_num = -1,
-        .quadhd_io_num = -1,
-        .max_transfer_sz = LCD_H_RES * LCD_V_RES * sizeof(uint16_t) + 8
-    };
-    ESP_ERROR_CHECK(spi_bus_initialize(LCD_HOST, &buscfg, SPI_DMA_CH_AUTO));
-
-    ESP_LOGI(TAG, "Install panel IO");
-    esp_lcd_panel_io_spi_config_t io_config = {
-        .dc_gpio_num = PIN_NUM_DC,
-        .cs_gpio_num = PIN_NUM_CS,
-        .pclk_hz = LCD_PIXEL_CLOCK_HZ,
-        .lcd_cmd_bits = 8,
-        .lcd_param_bits = 8,
-        .spi_mode = 0,
-        .trans_queue_depth = 10,
-    };
-    // Attach the LCD to the SPI bus
-    ESP_ERROR_CHECK(esp_lcd_new_panel_io_spi((esp_lcd_spi_bus_handle_t)LCD_HOST, &io_config, &io_handle));
-
-    ESP_LOGI(TAG, "Install GC9A01 panel driver");
-    esp_lcd_panel_dev_config_t panel_config = {
-        .reset_gpio_num = PIN_NUM_RST,
-        .rgb_endian = LCD_RGB_ENDIAN_BGR,
-        .bits_per_pixel = 16,
-    };
-    ESP_ERROR_CHECK(esp_lcd_new_panel_gc9a01(io_handle, &panel_config, &panel_handle));
-
-    ESP_ERROR_CHECK(esp_lcd_panel_reset(panel_handle));
-    ESP_ERROR_CHECK(esp_lcd_panel_init(panel_handle));
-    ESP_ERROR_CHECK(esp_lcd_panel_mirror(panel_handle, true, false));
-    ESP_ERROR_CHECK(esp_lcd_panel_disp_on_off(panel_handle, true));
-
-    // Initialize backlight
-    init_backlight();
-    lcd_set_brightness(100);
-
-    // Clear screen to black
-    lcd_clear(0x0000);
-
-    ESP_LOGI(TAG, "LCD initialized successfully");
-    return ret;
+    esp_lcd_panel_draw_bitmap(s_panel, x1, y1, x2, y2, data);
 }
 
-/**
- * Clear the entire screen with a color
- */
 void lcd_clear(uint16_t color)
 {
-    if (panel_handle == NULL) return;
-    
-    // Create a buffer filled with the color
-    size_t buffer_size = LCD_H_RES * 10; // Process in chunks
-    uint16_t *buffer = heap_caps_malloc(buffer_size * sizeof(uint16_t), MALLOC_CAP_DMA);
-    if (buffer == NULL) {
-        ESP_LOGE(TAG, "Failed to allocate buffer for clear");
-        return;
-    }
-    
-    // Fill buffer with color
-    for (size_t i = 0; i < buffer_size; i++) {
-        buffer[i] = color;
-    }
-    
-    // Send buffer to display in chunks
+    if (!s_panel) return;
+    uint16_t *buf = heap_caps_malloc(LCD_H_RES * 10 * sizeof(uint16_t), MALLOC_CAP_DMA);
+    if (!buf) return;
+    for (int i = 0; i < LCD_H_RES * 10; i++) buf[i] = color;
     for (int y = 0; y < LCD_V_RES; y += 10) {
-        int height = (y + 10 > LCD_V_RES) ? (LCD_V_RES - y) : 10;
-        esp_lcd_panel_draw_bitmap(panel_handle, 0, y, LCD_H_RES, y + height, buffer);
+        int h = (y + 10 > LCD_V_RES) ? (LCD_V_RES - y) : 10;
+        esp_lcd_panel_draw_bitmap(s_panel, 0, y, LCD_H_RES, y + h, buf);
     }
-    
-    free(buffer);
+    free(buf);
 }
 
-/**
- * Draw a single pixel
- */
 void lcd_draw_pixel(int16_t x, int16_t y, uint16_t color)
 {
-    if (panel_handle == NULL || x < 0 || x >= LCD_H_RES || y < 0 || y >= LCD_V_RES) return;
-    
-    esp_lcd_panel_draw_bitmap(panel_handle, x, y, x + 1, y + 1, &color);
+    if (!s_panel) return;
+    esp_lcd_panel_draw_bitmap(s_panel, x, y, x + 1, y + 1, &color);
 }
 
-/**
- * Draw a line using Bresenham's algorithm
- */
+void lcd_set_brightness(uint8_t pct)
+{
+    gpio_set_level(PIN_BL, pct > 0 ? 1 : 0);
+}
+
+void lcd_display_on(bool on)
+{
+    if (s_panel) esp_lcd_panel_disp_on_off(s_panel, on);
+}
+
+void lcd_set_rotation(uint8_t r)
+{
+    if (!s_panel) return;
+    esp_lcd_panel_swap_xy(s_panel,   r == 1 || r == 3);
+    esp_lcd_panel_mirror(s_panel,    r == 2 || r == 3, r == 1 || r == 2);
+}
+
+esp_lcd_panel_io_handle_t lcd_get_io_handle(void) { return s_io_handle; }
+
+/* ============================================================
+ * Non-S3 targets — stub implementations (no i8080 hardware)
+ * ============================================================ */
+#else
+
+esp_err_t lcd_init(void)                                             { return ESP_OK; }
+void lcd_draw_bitmap(int x1, int y1, int x2, int y2, const void *d) { (void)x1;(void)y1;(void)x2;(void)y2;(void)d; }
+void lcd_clear(uint16_t color)                                       { (void)color; }
+void lcd_draw_pixel(int16_t x, int16_t y, uint16_t c)               { (void)x;(void)y;(void)c; }
+void lcd_set_brightness(uint8_t b)                                   { (void)b; }
+void lcd_display_on(bool on)                                         { (void)on; }
+void lcd_set_rotation(uint8_t r)                                     { (void)r; }
+esp_lcd_panel_io_handle_t lcd_get_io_handle(void)                   { return NULL; }
+
+#endif  /* CONFIG_IDF_TARGET_ESP32S3 */
+
+/* ============================================================
+ * Higher-level drawing (target-independent, built on draw_pixel)
+ * These are slow — only use outside of LVGL rendering.
+ * ============================================================ */
+
 void lcd_draw_line(int16_t x0, int16_t y0, int16_t x1, int16_t y1, uint16_t color)
 {
     int16_t steep = abs(y1 - y0) > abs(x1 - x0);
-    
-    if (steep) {
-        int16_t temp = x0; x0 = y0; y0 = temp;
-        temp = x1; x1 = y1; y1 = temp;
-    }
-    
-    if (x0 > x1) {
-        int16_t temp = x0; x0 = x1; x1 = temp;
-        temp = y0; y0 = y1; y1 = temp;
-    }
-    
-    int16_t dx = x1 - x0;
-    int16_t dy = abs(y1 - y0);
-    int16_t err = dx / 2;
-    int16_t ystep = (y0 < y1) ? 1 : -1;
-    
-    for (; x0 <= x1; x0++) {
-        if (steep) {
-            lcd_draw_pixel(y0, x0, color);
-        } else {
-            lcd_draw_pixel(x0, y0, color);
-        }
+    if (steep) { int16_t t; t=x0; x0=y0; y0=t; t=x1; x1=y1; y1=t; }
+    if (x0 > x1) { int16_t t; t=x0; x0=x1; x1=t; t=y0; y0=y1; y1=t; }
+    int16_t dx = x1 - x0, dy = abs(y1 - y0);
+    int16_t err = dx / 2, ystep = (y0 < y1) ? 1 : -1, y = y0;
+    for (int16_t x = x0; x <= x1; x++) {
+        if (steep) lcd_draw_pixel(y, x, color); else lcd_draw_pixel(x, y, color);
         err -= dy;
-        if (err < 0) {
-            y0 += ystep;
-            err += dx;
-        }
+        if (err < 0) { y += ystep; err += dx; }
     }
 }
 
-/**
- * Draw a rectangle outline
- */
 void lcd_draw_rectangle(int16_t x0, int16_t y0, int16_t x1, int16_t y1, uint16_t color)
 {
     lcd_draw_line(x0, y0, x1, y0, color);
     lcd_draw_line(x1, y0, x1, y1, color);
-    lcd_draw_line(x1, y1, x0, y1, color);
-    lcd_draw_line(x0, y1, x0, y0, color);
+    lcd_draw_line(x0, y1, x1, y1, color);
+    lcd_draw_line(x0, y0, x0, y1, color);
 }
 
-/**
- * Draw a filled rectangle
- */
 void lcd_draw_filled_rectangle(int16_t x0, int16_t y0, int16_t x1, int16_t y1, uint16_t color)
 {
-    if (panel_handle == NULL) return;
-    
-    // Ensure coordinates are in correct order
-    if (x0 > x1) { int16_t temp = x0; x0 = x1; x1 = temp; }
-    if (y0 > y1) { int16_t temp = y0; y0 = y1; y1 = temp; }
-    
-    // Clip to screen bounds
-    if (x0 < 0) x0 = 0;
-    if (y0 < 0) y0 = 0;
-    if (x1 >= LCD_H_RES) x1 = LCD_H_RES - 1;
-    if (y1 >= LCD_V_RES) y1 = LCD_V_RES - 1;
-    
-    int width = x1 - x0 + 1;
-    int height = y1 - y0 + 1;
-    
-    // Create buffer filled with color
-    size_t buffer_size = width * height;
-    uint16_t *buffer = heap_caps_malloc(buffer_size * sizeof(uint16_t), MALLOC_CAP_DMA);
-    if (buffer == NULL) {
-        // Fall back to pixel-by-pixel drawing
-        for (int16_t y = y0; y <= y1; y++) {
-            for (int16_t x = x0; x <= x1; x++) {
-                lcd_draw_pixel(x, y, color);
-            }
-        }
-        return;
-    }
-    
-    // Fill buffer
-    for (size_t i = 0; i < buffer_size; i++) {
-        buffer[i] = color;
-    }
-    
-    // Draw bitmap
-    esp_lcd_panel_draw_bitmap(panel_handle, x0, y0, x1 + 1, y1 + 1, buffer);
-    
-    free(buffer);
+    for (int16_t y = y0; y <= y1; y++)
+        lcd_draw_line(x0, y, x1, y, color);
 }
 
-/**
- * Draw a circle outline using Bresenham's algorithm
- */
-void lcd_draw_circle(int16_t x, int16_t y, int16_t r, uint16_t color)
+void lcd_draw_circle(int16_t cx, int16_t cy, int16_t r, uint16_t color)
 {
-    int16_t f = 1 - r;
-    int16_t ddF_x = 1;
-    int16_t ddF_y = -2 * r;
-    int16_t x_pos = 0;
-    int16_t y_pos = r;
-    
-    lcd_draw_pixel(x, y + r, color);
-    lcd_draw_pixel(x, y - r, color);
-    lcd_draw_pixel(x + r, y, color);
-    lcd_draw_pixel(x - r, y, color);
-    
-    while (x_pos < y_pos) {
-        if (f >= 0) {
-            y_pos--;
-            ddF_y += 2;
-            f += ddF_y;
-        }
-        x_pos++;
-        ddF_x += 2;
-        f += ddF_x;
-        
-        lcd_draw_pixel(x + x_pos, y + y_pos, color);
-        lcd_draw_pixel(x - x_pos, y + y_pos, color);
-        lcd_draw_pixel(x + x_pos, y - y_pos, color);
-        lcd_draw_pixel(x - x_pos, y - y_pos, color);
-        lcd_draw_pixel(x + y_pos, y + x_pos, color);
-        lcd_draw_pixel(x - y_pos, y + x_pos, color);
-        lcd_draw_pixel(x + y_pos, y - x_pos, color);
-        lcd_draw_pixel(x - y_pos, y - x_pos, color);
+    int16_t x = 0, y = r, d = 1 - r;
+    while (x <= y) {
+        lcd_draw_pixel(cx+x, cy+y, color); lcd_draw_pixel(cx-x, cy+y, color);
+        lcd_draw_pixel(cx+x, cy-y, color); lcd_draw_pixel(cx-x, cy-y, color);
+        lcd_draw_pixel(cx+y, cy+x, color); lcd_draw_pixel(cx-y, cy+x, color);
+        lcd_draw_pixel(cx+y, cy-x, color); lcd_draw_pixel(cx-y, cy-x, color);
+        if (d < 0) d += 2 * x + 3; else { d += 2 * (x - y) + 5; y--; }
+        x++;
     }
 }
 
-/**
- * Draw a filled circle
- */
-void lcd_draw_filled_circle(int16_t x, int16_t y, int16_t r, uint16_t color)
+void lcd_draw_filled_circle(int16_t cx, int16_t cy, int16_t r, uint16_t color)
 {
-    int16_t f = 1 - r;
-    int16_t ddF_x = 1;
-    int16_t ddF_y = -2 * r;
-    int16_t x_pos = 0;
-    int16_t y_pos = r;
-    
-    lcd_draw_line(x, y - r, x, y + r, color);
-    
-    while (x_pos < y_pos) {
-        if (f >= 0) {
-            y_pos--;
-            ddF_y += 2;
-            f += ddF_y;
-        }
-        x_pos++;
-        ddF_x += 2;
-        f += ddF_x;
-        
-        lcd_draw_line(x - x_pos, y - y_pos, x - x_pos, y + y_pos, color);
-        lcd_draw_line(x + x_pos, y - y_pos, x + x_pos, y + y_pos, color);
-        lcd_draw_line(x - y_pos, y - x_pos, x - y_pos, y + x_pos, color);
-        lcd_draw_line(x + y_pos, y - x_pos, x + y_pos, y + x_pos, color);
+    for (int16_t y = -r; y <= r; y++) {
+        int16_t w = (int16_t)sqrt((float)(r*r - y*y));
+        lcd_draw_line(cx - w, cy + y, cx + w, cy + y, color);
     }
 }
 
-/**
- * Draw a character
- */
-void lcd_draw_char(int16_t x, int16_t y, char c, uint16_t color, uint16_t bg_color, uint8_t size)
-{
-    if (c < ' ' || c > '~') c = '?'; // Replace unsupported chars
-    
-    for (int8_t i = 0; i < 5; i++) {
-        uint8_t line = font5x7[(c - ' ') * 5 + i];
-        for (int8_t j = 0; j < 8; j++) {
-            if (line & 0x01) {
-                if (size == 1) {
-                    lcd_draw_pixel(x + i, y + j, color);
-                } else {
-                    lcd_draw_filled_rectangle(x + i * size, y + j * size, 
-                                            x + i * size + size - 1, 
-                                            y + j * size + size - 1, color);
-                }
-            } else if (bg_color != color) {
-                if (size == 1) {
-                    lcd_draw_pixel(x + i, y + j, bg_color);
-                } else {
-                    lcd_draw_filled_rectangle(x + i * size, y + j * size, 
-                                            x + i * size + size - 1, 
-                                            y + j * size + size - 1, bg_color);
-                }
-            }
-            line >>= 1;
-        }
-    }
-}
-
-/**
- * Draw a string
- */
-void lcd_draw_string(int16_t x, int16_t y, const char *str, uint16_t color, uint16_t bg_color, uint8_t size)
-{
-    while (*str) {
-        lcd_draw_char(x, y, *str, color, bg_color, size);
-        x += 6 * size; // 5 pixels wide + 1 space
-        str++;
-    }
-}
-
-/**
- * Set display rotation
- */
-void lcd_set_rotation(uint8_t rotation)
-{
-    if (panel_handle == NULL) return;
-    
-    bool mirror_x = false;
-    bool mirror_y = false;
-    bool swap_xy = false;
-    
-    switch (rotation & 3) {
-        case 0:
-            break;
-        case 1:
-            swap_xy = true;
-            mirror_x = true;
-            break;
-        case 2:
-            mirror_x = true;
-            mirror_y = true;
-            break;
-        case 3:
-            swap_xy = true;
-            mirror_y = true;
-            break;
-    }
-    
-    esp_lcd_panel_mirror(panel_handle, mirror_x, mirror_y);
-    esp_lcd_panel_swap_xy(panel_handle, swap_xy);
-}
-
-/**
- * Turn display on/off
- */
-void lcd_display_on(bool on)
-{
-    if (panel_handle == NULL) return;
-    
-    esp_lcd_panel_disp_on_off(panel_handle, on);
-}
-
-/**
- * Set display brightness
- */
-void lcd_set_brightness(uint8_t brightness)
-{
-#ifdef PIN_NUM_BK_LIGHT
-    if (brightness > 100) brightness = 100;
-    
-    uint32_t duty = (8191 * brightness) / 100; // Convert to 13-bit duty
-    ledc_set_duty(LEDC_LOW_SPEED_MODE, LEDC_CHANNEL_0, duty);
-    ledc_update_duty(LEDC_LOW_SPEED_MODE, LEDC_CHANNEL_0);
-#endif
-}
+/* Char/string drawing omitted — not needed for LVGL. */
+void lcd_draw_char(int16_t x, int16_t y, char c, uint16_t color, uint16_t bg, uint8_t sz) { (void)x;(void)y;(void)c;(void)color;(void)bg;(void)sz; }
+void lcd_draw_string(int16_t x, int16_t y, const char *s, uint16_t color, uint16_t bg, uint8_t sz) { (void)x;(void)y;(void)s;(void)color;(void)bg;(void)sz; }

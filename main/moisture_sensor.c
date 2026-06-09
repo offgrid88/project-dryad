@@ -20,6 +20,8 @@ static const char *TAG = "moisture_sensor";
 #define ADC_CHANNEL ADC_CHANNEL_0   // GPIO0
 #elif CONFIG_IDF_TARGET_ESP32C3
 #define ADC_CHANNEL ADC_CHANNEL_0   // GPIO0
+#elif CONFIG_IDF_TARGET_ESP32S3
+#define ADC_CHANNEL ADC_CHANNEL_3   // GPIO4 (GPIO3 = LCD reset, cannot use)
 #elif CONFIG_IDF_TARGET_ESP32
 #define ADC_CHANNEL ADC_CHANNEL_6   // GPIO34 (input-only, ADC1_CH6)
 #else

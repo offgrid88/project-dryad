@@ -2,6 +2,7 @@
 build/
 sdkconfig
 sdkconfig.old
+sdkconfig.*
 *.pyc
 
 # Editor directories and files

@@ -1,10 +1,4 @@
-# ESP32-C6 Configuration
-CONFIG_IDF_TARGET="esp32c6"
-
-# Serial flasher config
-CONFIG_ESPTOOLPY_FLASHMODE_DIO=y
-CONFIG_ESPTOOLPY_FLASHFREQ_80M=y
-CONFIG_ESPTOOLPY_FLASHSIZE_4MB=y
+# Common configuration for all targets
 
 # Partition Table
 CONFIG_PARTITION_TABLE_CUSTOM=y
@@ -31,3 +25,7 @@ CONFIG_ADC_ONESHOT_CTRL_FUNC_IN_IRAM=n
 
 # Disable unnecessary features to save space
 CONFIG_ESP_WIFI_SOFTAP_SUPPORT=n
+
+# LVGL fonts (used across all display-equipped boards)
+CONFIG_LV_FONT_MONTSERRAT_14=y
+CONFIG_LV_FONT_MONTSERRAT_16=y

@@ -1,143 +1,110 @@
 /**
  * @file lvgl_port_display.c
- * @brief LVGL display driver implementation for ESP32-C3 LCD
+ * @brief Minimal LVGL display port — synchronous semaphore flush, no separate task.
+ *
+ * disp_flush starts DMA, then blocks on s_flush_done until the on_color_trans_done
+ * ISR fires, then calls lv_disp_flush_ready.  This serialises render+flush per tile
+ * but removes all async race conditions for debugging.
  */
 
 #include "lvgl_port_display.h"
 #include "lcd_driver.h"
 #include "esp_log.h"
 #include "esp_timer.h"
+#include "esp_lcd_panel_io.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 #include "freertos/semphr.h"
-#include <string.h>
 
 static const char *TAG = "LVGL_PORT";
 
-// Display buffer size (1/10 of the screen)
-#define DISP_BUF_SIZE (240 * 240 / 10)
+#define LCD_H_RES       240
+#define LCD_V_RES       320
+#define DISP_BUF_LINES  32
+#define DISP_BUF_SIZE   (LCD_H_RES * DISP_BUF_LINES)
 
-// LVGL objects
 static lv_disp_draw_buf_t disp_buf;
-static lv_disp_drv_t disp_drv;
-static lv_disp_t *disp;
-static lv_color_t *buf1;
-static lv_color_t *buf2;
+static lv_disp_drv_t      disp_drv;
+static lv_color_t        *buf1;
+static SemaphoreHandle_t  s_flush_done;
 
-// Mutex for thread safety
-static SemaphoreHandle_t lvgl_mutex = NULL;
-
-// Forward declarations
-static void disp_flush(lv_disp_drv_t *disp_drv, const lv_area_t *area, lv_color_t *color_p);
-
-/**
- * @brief Flush display buffer to LCD
- */
-static void disp_flush(lv_disp_drv_t *disp_drv, const lv_area_t *area, lv_color_t *color_p)
+static void lvgl_tick_cb(void *arg)
 {
-    int32_t x, y;
-    int32_t w = area->x2 - area->x1 + 1;
-    int32_t h = area->y2 - area->y1 + 1;
-    
-    // Create a temporary buffer for the rectangular area
-    size_t len = w * h;
-    uint16_t *buffer = (uint16_t *)color_p;
-    
-    // For GC9A01 circular display, we need to check if pixels are within the circle
-    int32_t center_x = 120; // Display center X
-    int32_t center_y = 120; // Display center Y
-    int32_t radius = 120;   // Display radius
-    
-    // Draw the buffer pixel by pixel (not optimal, but works for circular display)
-    for (y = area->y1; y <= area->y2; y++) {
-        for (x = area->x1; x <= area->x2; x++) {
-            // Check if pixel is within the circular display
-            int32_t dx = x - center_x;
-            int32_t dy = y - center_y;
-            if ((dx * dx + dy * dy) <= (radius * radius)) {
-                // Get color from buffer
-                uint16_t color = buffer[(y - area->y1) * w + (x - area->x1)];
-                lcd_draw_pixel(x, y, color);
-            }
-        }
-    }
-    
-    // Inform LVGL that flushing is done
-    lv_disp_flush_ready(disp_drv);
+    (void)arg;
+    lv_tick_inc(1);
 }
 
-/**
- * @brief Initialize LVGL display driver
- */
+static bool on_trans_done(esp_lcd_panel_io_handle_t io,
+                          esp_lcd_panel_io_event_data_t *edata,
+                          void *user_ctx)
+{
+    (void)io; (void)edata; (void)user_ctx;
+    BaseType_t woke = pdFALSE;
+    xSemaphoreGiveFromISR(s_flush_done, &woke);
+    return woke == pdTRUE;
+}
+
+static void disp_flush(lv_disp_drv_t *drv, const lv_area_t *area, lv_color_t *color_p)
+{
+    lcd_draw_bitmap(area->x1, area->y1, area->x2 + 1, area->y2 + 1, color_p);
+    xSemaphoreTake(s_flush_done, portMAX_DELAY);
+    lv_disp_flush_ready(drv);
+}
+
 esp_err_t lvgl_port_display_init(void)
 {
-    ESP_LOGI(TAG, "Initializing LVGL display port");
-    
-    // Create mutex
-    lvgl_mutex = xSemaphoreCreateMutex();
-    if (lvgl_mutex == NULL) {
-        ESP_LOGE(TAG, "Failed to create mutex");
+    ESP_LOGI(TAG, "LVGL init (sync flush, single buf, 240x320)");
+
+    s_flush_done = xSemaphoreCreateBinary();
+    if (!s_flush_done) {
+        ESP_LOGE(TAG, "Semaphore alloc failed");
         return ESP_ERR_NO_MEM;
     }
-    
-    // Initialize LVGL
+
     lv_init();
-    
-    // Allocate display buffers
+
+    const esp_timer_create_args_t tick_args = {
+        .callback = lvgl_tick_cb,
+        .name     = "lvgl_tick",
+    };
+    esp_timer_handle_t tick_timer;
+    ESP_ERROR_CHECK(esp_timer_create(&tick_args, &tick_timer));
+    ESP_ERROR_CHECK(esp_timer_start_periodic(tick_timer, 1000));
+
     buf1 = heap_caps_malloc(DISP_BUF_SIZE * sizeof(lv_color_t), MALLOC_CAP_DMA);
-    buf2 = heap_caps_malloc(DISP_BUF_SIZE * sizeof(lv_color_t), MALLOC_CAP_DMA);
-    
-    if (buf1 == NULL || buf2 == NULL) {
-        ESP_LOGE(TAG, "Failed to allocate display buffers");
-        if (buf1) free(buf1);
-        if (buf2) free(buf2);
+    if (!buf1) {
+        ESP_LOGE(TAG, "Buffer alloc failed");
         return ESP_ERR_NO_MEM;
     }
-    
-    // Initialize display buffer
-    lv_disp_draw_buf_init(&disp_buf, buf1, buf2, DISP_BUF_SIZE);
-    
-    // Initialize display driver
+
+    lv_disp_draw_buf_init(&disp_buf, buf1, NULL, DISP_BUF_SIZE);
+
     lv_disp_drv_init(&disp_drv);
-    disp_drv.hor_res = 240;
-    disp_drv.ver_res = 240;
+    disp_drv.hor_res  = LCD_H_RES;
+    disp_drv.ver_res  = LCD_V_RES;
     disp_drv.flush_cb = disp_flush;
     disp_drv.draw_buf = &disp_buf;
-    
-    // Register display driver
-    disp = lv_disp_drv_register(&disp_drv);
-    
-    ESP_LOGI(TAG, "LVGL display port initialized");
+    lv_disp_drv_register(&disp_drv);
+
+    esp_lcd_panel_io_handle_t io = lcd_get_io_handle();
+    if (!io) {
+        ESP_LOGE(TAG, "No LCD IO handle");
+        return ESP_FAIL;
+    }
+    const esp_lcd_panel_io_callbacks_t cbs = {
+        .on_color_trans_done = on_trans_done,
+    };
+    ESP_ERROR_CHECK(esp_lcd_panel_io_register_event_callbacks(io, &cbs, NULL));
+
+    /* Drain any stale gives from i80 bus activity before LVGL starts flushing */
+    xSemaphoreTake(s_flush_done, 0);
+
+    ESP_LOGI(TAG, "LVGL display ready");
     return ESP_OK;
 }
 
-/**
- * @brief Get the active display object
- */
-lv_disp_t *lvgl_port_display_get(void)
-{
-    return disp;
-}
+lv_disp_t *lvgl_port_display_get(void) { return NULL; }
 
-/**
- * @brief Lock the display mutex
- */
-bool lvgl_port_lock(int timeout_ms)
-{
-    if (lvgl_mutex == NULL) {
-        return false;
-    }
-    
-    const TickType_t timeout_ticks = timeout_ms < 0 ? portMAX_DELAY : pdMS_TO_TICKS(timeout_ms);
-    return xSemaphoreTake(lvgl_mutex, timeout_ticks) == pdTRUE;
-}
-
-/**
- * @brief Unlock the display mutex
- */
-void lvgl_port_unlock(void)
-{
-    if (lvgl_mutex != NULL) {
-        xSemaphoreGive(lvgl_mutex);
-    }
-}
+/* No separate LVGL task — single-threaded access, no mutex needed */
+bool lvgl_port_lock(int timeout_ms)  { (void)timeout_ms; return true; }
+void lvgl_port_unlock(void)          {}
