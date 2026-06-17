@@ -1,240 +1,105 @@
 #include "display.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
-#include "freertos/queue.h"
-#include "freertos/semphr.h"
 #include "esp_log.h"
-#include "esp_timer.h"
-#include "esp_chip_info.h"
-#include "esp_system.h"
 #include "lcd_driver.h"
-#include "button_handler.h"
 #include "lvgl_port_display.h"
-#include "lvgl_port_indev.h"
 #include "lvgl.h"
 
 static const char *TAG = "display";
 
-// Shared moisture data (written by moisture task, read by display task)
-static volatile int s_moisture_percent = 0;
-static SemaphoreHandle_t s_moisture_mutex = NULL;
+void display_set_moisture(int percent) { (void)percent; }
 
-// LVGL UI objects
-static lv_obj_t *s_moisture_label = NULL;
-static lv_obj_t *s_status_label   = NULL;
-static lv_meter_indicator_t *s_gauge_needle = NULL;
-static lv_obj_t *s_gauge_meter    = NULL;
+/* ── Helpers ────────────────────────────────────────────── */
 
-static QueueHandle_t s_button_queue = NULL;
-
-// ── Shared data API ──────────────────────────────────────────────────────────
-
-void display_set_moisture(int percent)
+static lv_obj_t *make_line(lv_obj_t *parent,
+                            lv_point_t *pts, uint16_t n,
+                            uint32_t color, int width)
 {
-    if (s_moisture_mutex && xSemaphoreTake(s_moisture_mutex, pdMS_TO_TICKS(10)) == pdTRUE) {
-        s_moisture_percent = percent;
-        xSemaphoreGive(s_moisture_mutex);
-    }
+    lv_obj_t *l = lv_line_create(parent);
+    lv_line_set_points(l, pts, n);
+    lv_obj_set_style_line_color(l, lv_color_hex(color), 0);
+    lv_obj_set_style_line_width(l, width, 0);
+    lv_obj_set_style_line_rounded(l, true, 0);
+    return l;
 }
 
-static int get_moisture(void)
+static lv_obj_t *make_rect(lv_obj_t *parent,
+                            int w, int h, int radius,
+                            uint32_t color, lv_opa_t opa,
+                            int align_x, int align_y)
 {
-    int val = 0;
-    if (s_moisture_mutex && xSemaphoreTake(s_moisture_mutex, pdMS_TO_TICKS(10)) == pdTRUE) {
-        val = s_moisture_percent;
-        xSemaphoreGive(s_moisture_mutex);
-    }
-    return val;
+    lv_obj_t *o = lv_obj_create(parent);
+    lv_obj_set_size(o, w, h);
+    lv_obj_align(o, LV_ALIGN_CENTER, align_x, align_y);
+    lv_obj_set_style_radius(o, radius, 0);
+    lv_obj_set_style_bg_color(o, lv_color_hex(color), 0);
+    lv_obj_set_style_bg_opa(o, opa, 0);
+    lv_obj_set_style_border_width(o, 0, 0);
+    lv_obj_set_style_shadow_width(o, 0, 0);
+    lv_obj_set_style_pad_all(o, 0, 0);
+    lv_obj_clear_flag(o, LV_OBJ_FLAG_SCROLLABLE);
+    return o;
 }
 
-// ── UI helpers ───────────────────────────────────────────────────────────────
+/* ── Face ───────────────────────────────────────────────── */
 
-static const char *moisture_status(int pct)
+static void create_face(void)
 {
-    if (pct < 20) return "Thirsty!";
-    if (pct < 50) return "Doing OK";
-    if (pct < 80) return "Happy :)";
-    return "Too wet!";
+    lv_obj_t *scr = lv_scr_act();
+
+    /* Deep black background */
+    lv_obj_set_style_bg_color(scr, lv_color_hex(0x0E0E0E), 0);
+    lv_obj_set_style_bg_opa(scr, LV_OPA_COVER, 0);
+    lv_obj_clear_flag(scr, LV_OBJ_FLAG_SCROLLABLE);
+
+    /* ── Left eye ">"
+     *    Two thick white lines meeting at a tip on the right.
+     *    Screen coords: all absolute (top-left = 0,0).
+     *    Eye center ~(82, 148), tip at (108, 148).
+     */
+    static lv_point_t lt[] = {{48, 115}, {108, 148}};
+    static lv_point_t lb[] = {{108, 148}, {48, 181}};
+    make_line(scr, lt, 2, 0xFFFFFF, 10);
+    make_line(scr, lb, 2, 0xFFFFFF, 10);
+
+    /* ── Right eye "<"
+     *    Mirror: tip on the left at (132, 148).
+     */
+    static lv_point_t rt[] = {{192, 115}, {132, 148}};
+    static lv_point_t rb[] = {{132, 148}, {192, 181}};
+    make_line(scr, rt, 2, 0xFFFFFF, 10);
+    make_line(scr, rb, 2, 0xFFFFFF, 10);
+
+    /* ── Nose: small pink rounded oval ── */
+    make_rect(scr, 22, 28, 8, 0xFF3355, LV_OPA_COVER, 0, 52);
+
+    /* ── Mouth: tiny dark-grey rounded rect ── */
+    make_rect(scr, 28, 18, 6, 0x4A4A4A, LV_OPA_COVER, 0, 86);
 }
 
-static lv_color_t moisture_color(int pct)
-{
-    if (pct < 20) return lv_palette_main(LV_PALETTE_RED);
-    if (pct < 50) return lv_palette_main(LV_PALETTE_ORANGE);
-    if (pct < 80) return lv_palette_main(LV_PALETTE_GREEN);
-    return lv_palette_main(LV_PALETTE_BLUE);
-}
-
-// ── Screen creation ──────────────────────────────────────────────────────────
-
-static void create_plant_screen(lv_obj_t *screen)
-{
-    // Title
-    lv_obj_t *title = lv_label_create(screen);
-    lv_label_set_text(title, "Dryad");
-    lv_obj_align(title, LV_ALIGN_TOP_MID, 0, 12);
-    lv_obj_set_style_text_font(title, &lv_font_montserrat_16, 0);
-
-    // Moisture gauge
-    s_gauge_meter = lv_meter_create(screen);
-    lv_obj_set_size(s_gauge_meter, 160, 160);
-    lv_obj_align(s_gauge_meter, LV_ALIGN_CENTER, 0, 0);
-
-    lv_meter_scale_t *scale = lv_meter_add_scale(s_gauge_meter);
-    lv_meter_set_scale_ticks(s_gauge_meter, scale, 41, 2, 10, lv_palette_main(LV_PALETTE_GREY));
-    lv_meter_set_scale_major_ticks(s_gauge_meter, scale, 8, 4, 15, lv_color_black(), 10);
-    lv_meter_set_scale_range(s_gauge_meter, scale, 0, 100, 270, 135);
-
-    // Dry zone (red)
-    lv_meter_indicator_t *indic;
-    indic = lv_meter_add_scale_lines(s_gauge_meter, scale,
-        lv_palette_main(LV_PALETTE_RED), lv_palette_main(LV_PALETTE_RED), false, 0);
-    lv_meter_set_indicator_start_value(s_gauge_meter, indic, 0);
-    lv_meter_set_indicator_end_value(s_gauge_meter, indic, 20);
-
-    // Good zone (green arc)
-    indic = lv_meter_add_arc(s_gauge_meter, scale, 3, lv_palette_main(LV_PALETTE_GREEN), 0);
-    lv_meter_set_indicator_start_value(s_gauge_meter, indic, 20);
-    lv_meter_set_indicator_end_value(s_gauge_meter, indic, 80);
-
-    // Wet zone (blue)
-    indic = lv_meter_add_scale_lines(s_gauge_meter, scale,
-        lv_palette_main(LV_PALETTE_BLUE), lv_palette_main(LV_PALETTE_BLUE), false, 0);
-    lv_meter_set_indicator_start_value(s_gauge_meter, indic, 80);
-    lv_meter_set_indicator_end_value(s_gauge_meter, indic, 100);
-
-    // Needle
-    s_gauge_needle = lv_meter_add_needle_line(s_gauge_meter, scale, 4,
-        lv_palette_main(LV_PALETTE_ORANGE), -10);
-
-    // Moisture % label
-    s_moisture_label = lv_label_create(screen);
-    lv_label_set_text(s_moisture_label, "-- %");
-    lv_obj_align(s_moisture_label, LV_ALIGN_BOTTOM_MID, 0, -30);
-    lv_obj_set_style_text_font(s_moisture_label, &lv_font_montserrat_16, 0);
-
-    // Status label
-    s_status_label = lv_label_create(screen);
-    lv_label_set_text(s_status_label, "Reading...");
-    lv_obj_align(s_status_label, LV_ALIGN_BOTTOM_MID, 0, -12);
-}
-
-// ── LVGL update (called every second from LVGL task) ─────────────────────────
-
-static void refresh_ui(void)
-{
-    int pct = get_moisture();
-
-    if (s_gauge_meter && s_gauge_needle)
-        lv_meter_set_indicator_value(s_gauge_meter, s_gauge_needle, pct);
-
-    if (s_moisture_label) {
-        char buf[16];
-        snprintf(buf, sizeof(buf), "%d %%", pct);
-        lv_label_set_text(s_moisture_label, buf);
-        lv_obj_set_style_text_color(s_moisture_label, moisture_color(pct), 0);
-    }
-
-    if (s_status_label)
-        lv_label_set_text(s_status_label, moisture_status(pct));
-}
-
-// ── LVGL task ────────────────────────────────────────────────────────────────
-
-static void lvgl_task(void *pvParameters)
-{
-    uint32_t refresh_tick = 0;
-
-    while (1) {
-        if (lvgl_port_lock(pdMS_TO_TICKS(10))) {
-            lv_task_handler();
-
-            // Refresh plant data every second
-            uint32_t now = xTaskGetTickCount();
-            if ((now - refresh_tick) >= pdMS_TO_TICKS(1000)) {
-                refresh_ui();
-                refresh_tick = now;
-            }
-
-            lvgl_port_unlock();
-        }
-        vTaskDelay(pdMS_TO_TICKS(10));
-    }
-}
-
-// ── Display task (entry point from main) ─────────────────────────────────────
+/* ── Display task ───────────────────────────────────────── */
 
 void display_task(void *pvParameters)
 {
-    s_moisture_mutex = xSemaphoreCreateMutex();
-    if (!s_moisture_mutex) {
-        ESP_LOGE(TAG, "Failed to create moisture mutex");
-        vTaskDelete(NULL);
-        return;
-    }
+    (void)pvParameters;
 
-    s_button_queue = xQueueCreate(10, sizeof(button_event_t));
-    if (!s_button_queue) {
-        ESP_LOGE(TAG, "Failed to create button queue");
-        vTaskDelete(NULL);
-        return;
-    }
-
-    ESP_LOGI(TAG, "Initializing LCD");
     if (lcd_init() != ESP_OK) {
         ESP_LOGE(TAG, "LCD init failed");
         vTaskDelete(NULL);
         return;
     }
-
-    ESP_LOGI(TAG, "Initializing buttons");
-    if (button_init(s_button_queue) != ESP_OK) {
-        ESP_LOGE(TAG, "Button init failed");
-        vTaskDelete(NULL);
-        return;
-    }
-
-    ESP_LOGI(TAG, "Initializing LVGL display port");
     if (lvgl_port_display_init() != ESP_OK) {
-        ESP_LOGE(TAG, "LVGL display init failed");
+        ESP_LOGE(TAG, "LVGL init failed");
         vTaskDelete(NULL);
         return;
     }
 
-    ESP_LOGI(TAG, "Initializing LVGL input port");
-    if (lvgl_port_indev_init(s_button_queue) != ESP_OK) {
-        ESP_LOGE(TAG, "LVGL input init failed");
-        vTaskDelete(NULL);
-        return;
+    create_face();
+    ESP_LOGI(TAG, "Face drawn");
+
+    while (1) {
+        lv_task_handler();
+        vTaskDelay(pdMS_TO_TICKS(10));
     }
-
-    // Start LVGL task with adequate stack (LVGL 8.x needs >=16KB)
-    TaskHandle_t lvgl_handle = NULL;
-    if (xTaskCreate(lvgl_task, "lvgl", 16384, NULL, 5, &lvgl_handle) != pdPASS) {
-        ESP_LOGE(TAG, "Failed to create LVGL task");
-        vTaskDelete(NULL);
-        return;
-    }
-
-    vTaskDelay(pdMS_TO_TICKS(100));
-
-    if (lvgl_port_lock(portMAX_DELAY)) {
-        lv_theme_t *theme = lv_theme_default_init(
-            lv_disp_get_default(),
-            lv_palette_main(LV_PALETTE_GREEN),
-            lv_palette_main(LV_PALETTE_ORANGE),
-            true,
-            &lv_font_montserrat_14
-        );
-        lv_disp_set_theme(lv_disp_get_default(), theme);
-
-        lv_obj_t *screen = lv_obj_create(NULL);
-        create_plant_screen(screen);
-        lv_scr_load(screen);
-
-        lvgl_port_unlock();
-    }
-
-    ESP_LOGI(TAG, "Display ready");
-    vTaskDelete(NULL);
 }

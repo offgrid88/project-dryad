@@ -10,7 +10,9 @@
 #define LCD_DRIVER_H
 
 #include <stdint.h>
+#include <stdbool.h>
 #include "esp_err.h"
+#include "esp_lcd_panel_io.h"
 
 #ifdef __cplusplus
 extern "C" {
@@ -136,6 +138,23 @@ void lcd_display_on(bool on);
  * @param brightness Brightness level (0-100)
  */
 void lcd_set_brightness(uint8_t brightness);
+
+/**
+ * @brief DMA-accelerated bitmap blit — used by the LVGL flush callback
+ *
+ * @param x1    Left column (inclusive)
+ * @param y1    Top row (inclusive)
+ * @param x2    Right column (exclusive, i.e. x1 + width)
+ * @param y2    Bottom row (exclusive, i.e. y1 + height)
+ * @param data  RGB565 pixel data in row-major order
+ */
+void lcd_draw_bitmap(int x1, int y1, int x2, int y2, const void *data);
+
+/**
+ * @brief Return the raw panel IO handle so the LVGL port can register
+ *        the on_color_trans_done DMA-completion callback.
+ */
+esp_lcd_panel_io_handle_t lcd_get_io_handle(void);
 
 #ifdef __cplusplus
 }
