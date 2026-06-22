@@ -6,4 +6,10 @@ idf_component_register(
     REQUIRES "driver"
              "esp_adc"
              "freertos"
+             "esp_timer"
+             "esp_system"
+             "lcd_driver"
+             "button_handler"
+             "lvgl_port"
+             "lvgl"
 )

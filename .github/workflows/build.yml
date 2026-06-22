@@ -1,4 +1,4 @@
-name: Build ESP32-C6 Firmware
+name: Build Firmware
 
 on:
   push:
@@ -8,80 +8,75 @@ on:
   workflow_dispatch:
 
 env:
-  IDF_VERSION: v5.5
-  TARGET: esp32c6
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
 
 jobs:
-  build:
-    name: Build ESP32-C6
+  discover-envs:
+    name: Discover PlatformIO environments
     runs-on: ubuntu-latest
-    
+    outputs:
+      envs: ${{ steps.parse.outputs.envs }}
     steps:
-    - name: Checkout code
-      uses: actions/checkout@v4
-      with:
-        submodules: 'recursive'
-    
-    - name: Build ESP-IDF Project
-      uses: espressif/esp-idf-ci-action@v1
-      with:
-        esp_idf_version: ${{ env.IDF_VERSION }}
-        target: ${{ env.TARGET }}
-        path: '.'
-    
-    - name: Create build info
-      run: |
-        echo "Build Information" > build_info.txt
-        echo "=================" >> build_info.txt
-        echo "Date: $(date)" >> build_info.txt
-        echo "Commit: ${{ github.sha }}" >> build_info.txt
-        echo "Branch: ${{ github.ref_name }}" >> build_info.txt
-        echo "ESP-IDF Version: ${{ env.IDF_VERSION }}" >> build_info.txt
-        echo "Target: ${{ env.TARGET }}" >> build_info.txt
-    
-    - name: Upload firmware artifacts
-      uses: actions/upload-artifact@v4
-      with:
-        name: esp32c6-firmware-${{ github.run_number }}
-        path: |
-          build/dryad.bin
-          build/dryad.elf
-          build/partition_table/partition-table.bin
-          build/bootloader/bootloader.bin
-          build/flash_args
-          build_info.txt
-        retention-days: 30
-    
-    - name: Generate flash instructions
-      run: |
-        echo "# ESP32-C6 Flash Instructions" > flash_instructions.md
-        echo "" >> flash_instructions.md
-        echo "## Quick Flash (using flash_args)" >> flash_instructions.md
-        echo '```bash' >> flash_instructions.md
-        echo "esptool.py -p PORT -b 460800 --before default_reset --after hard_reset write_flash @flash_args" >> flash_instructions.md
-        echo '```' >> flash_instructions.md
-        echo "" >> flash_instructions.md
-        echo "## Manual Flash" >> flash_instructions.md
-        echo '```bash' >> flash_instructions.md
-        echo "esptool.py -p PORT -b 460800 --chip esp32c6 \\" >> flash_instructions.md
-        echo "  --before default_reset --after hard_reset write_flash \\" >> flash_instructions.md
-        echo "  0x0 bootloader.bin \\" >> flash_instructions.md
-        echo "  0x8000 partition-table.bin \\" >> flash_instructions.md
-        echo "  0x10000 dryad.bin" >> flash_instructions.md
-        echo '```' >> flash_instructions.md
-        echo "" >> flash_instructions.md
-        echo "## Using ESP-IDF" >> flash_instructions.md
-        echo '```bash' >> flash_instructions.md
-        echo "idf.py -p PORT flash" >> flash_instructions.md
-        echo '```' >> flash_instructions.md
-        echo "" >> flash_instructions.md
-        echo "Replace PORT with your serial port (e.g., /dev/ttyUSB0, /dev/ttyACM0, or COM3)" >> flash_instructions.md
-    
-    - name: Upload flash instructions
-      uses: actions/upload-artifact@v4
-      with:
-        name: flash-instructions-${{ github.run_number }}
-        path: flash_instructions.md
-        retention-days: 30
-    
-    # Create release for main branch pushes
+      - uses: actions/checkout@v4
+
+      - name: Parse platformio.ini
+        id: parse
+        run: |
+          envs=$(python3 -c "
+          import configparser, json
+          cfg = configparser.ConfigParser()
+          cfg.read('platformio.ini')
+          envs = [s[4:] for s in cfg.sections() if s.startswith('env:')]
+          print(json.dumps(envs))
+          ")
+          echo "envs=$envs" >> $GITHUB_OUTPUT
+          echo "Found environments: $envs"
+
+  build:
+    name: Build [${{ matrix.env }}]
+    needs: discover-envs
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        env: ${{ fromJson(needs.discover-envs.outputs.envs) }}
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Cache PlatformIO
+        uses: actions/cache@v4
+        with:
+          path: ~/.platformio
+          key: ${{ runner.os }}-pio-${{ hashFiles('platformio.ini') }}
+          restore-keys: ${{ runner.os }}-pio-
+
+      - name: Install PlatformIO
+        run: pip install platformio
+
+      - name: Build ${{ matrix.env }}
+        run: pio run -e ${{ matrix.env }}
+
+      - name: Upload firmware
+        uses: actions/upload-artifact@v4
+        with:
+          name: firmware-${{ matrix.env }}-${{ github.run_number }}
+          path: |
+            .pio/build/${{ matrix.env }}/*.bin
+            .pio/build/${{ matrix.env }}/*.elf
+          retention-days: 30
+
+  build-summary:
+    name: All boards passed
+    needs: build
+    runs-on: ubuntu-latest
+    if: always()
+    steps:
+      - name: Check results
+        run: |
+          if [ "${{ needs.build.result }}" == "success" ]; then
+            echo "All board builds succeeded"
+          else
+            echo "One or more board builds failed"
+            exit 1
+          fi
