@@ -30,3 +30,5 @@ managed_components/
 
 # Logs
 *.log
+# CAD webapp
+cad-webapp/node_modules/

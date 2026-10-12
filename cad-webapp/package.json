@@ -1,0 +1,16 @@
+{
+  "name": "dryad-cad",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Parametric 3D-print CAD generator for the Project Dryad body (vase collar, housing, arm, bottle cradle)",
+  "scripts": {
+    "start": "node server.js",
+    "test": "node test/smoke.mjs"
+  },
+  "dependencies": {
+    "three": "^0.180.0",
+    "three-bvh-csg": "^0.0.17",
+    "three-mesh-bvh": "^0.9.0"
+  }
+}
