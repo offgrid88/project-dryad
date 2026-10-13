@@ -3,6 +3,7 @@
 #include "moisture_sensor.h"
 #include "display.h"
 #include "pump.h"
+#include "mesh_net.h"
 #include "esp_adc/adc_oneshot.h"
 #include "esp_adc/adc_cali.h"
 #include "esp_adc/adc_cali_scheme.h"
@@ -108,6 +109,7 @@ void moisture_sensor_task(void* pvParameters) {
         int pct = read_moisture_percent();
         pump_update(pct, SAMPLE_PERIOD_MS);
         display_set_status(pct, pump_is_running());
+        mesh_net_publish(pct, pump_is_running());
         vTaskDelay(pdMS_TO_TICKS(SAMPLE_PERIOD_MS));
     }
 }

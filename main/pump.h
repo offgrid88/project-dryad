@@ -52,4 +52,9 @@ void pump_init(void);
 void pump_update(int moisture_percent, int elapsed_ms);
 bool pump_is_running(void);
 
+/* Runtime overrides from the phone. on must stay below off. pwm is 0..100.
+ * manual is -1 auto, 0 force off, 1 force on. Max-on and min-off still apply. */
+void pump_set_thresholds(int on_below, int off_above, int pwm_percent);
+void pump_set_manual(int manual);
+
 #endif

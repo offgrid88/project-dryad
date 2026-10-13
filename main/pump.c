@@ -21,7 +21,7 @@ static const char *TAG = "pump";
 #define PUMP_DRIVER_NAME "L298"
 #endif
 
-static const pump_config_t s_cfg = {
+static pump_config_t s_cfg = {
     .on_below_percent = PUMP_ON_BELOW_PERCENT,
     .off_above_percent = PUMP_OFF_ABOVE_PERCENT,
     .pwm_percent = PUMP_PWM_PERCENT,
@@ -31,6 +31,7 @@ static const pump_config_t s_cfg = {
 
 static pump_state_t s_state;
 static bool s_ready;
+static int s_manual = -1;
 
 static void apply_outputs(void)
 {
@@ -84,14 +85,41 @@ void pump_init(void)
              PUMP_ON_BELOW_PERCENT, PUMP_OFF_ABOVE_PERCENT);
 }
 
+void pump_set_thresholds(int on_below, int off_above, int pwm_percent)
+{
+    if (on_below < 1 || on_below > 98 || off_above < 2 || off_above > 100 ||
+        on_below >= off_above || pwm_percent < 0 || pwm_percent > 100) {
+        return;
+    }
+    s_cfg.on_below_percent = on_below;
+    s_cfg.off_above_percent = off_above;
+    s_cfg.pwm_percent = pwm_percent;
+}
+
+void pump_set_manual(int manual)
+{
+    if (manual == -1 || manual == 0 || manual == 1) {
+        s_manual = manual;
+    }
+}
+
 void pump_update(int moisture_percent, int elapsed_ms)
 {
     if (!s_ready) {
         pump_init();
     }
 
+    /* Manual on looks dry, manual off looks wet. The real sample is unchanged
+     * for the display and the mesh status. */
+    int sample = moisture_percent;
+    if (s_manual == 0) {
+        sample = 100;
+    } else if (s_manual == 1) {
+        sample = 0;
+    }
+
     bool was_running = s_state.running;
-    pump_logic_step(&s_cfg, &s_state, moisture_percent, elapsed_ms);
+    pump_logic_step(&s_cfg, &s_state, sample, elapsed_ms);
     apply_outputs();
 
     if (was_running != s_state.running) {
