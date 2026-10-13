@@ -6,9 +6,19 @@
 #include "lvgl_port_display.h"
 #include "lvgl.h"
 
+#include <stdio.h>
+
 static const char *TAG = "display";
 
-void display_set_moisture(int percent) { (void)percent; }
+static volatile int s_moisture = -1;
+static volatile int s_pump_on;
+static lv_obj_t *s_status;
+
+void display_set_status(int moisture_percent, bool pump_on)
+{
+    s_moisture = moisture_percent;
+    s_pump_on = pump_on ? 1 : 0;
+}
 
 /* ── Helpers ────────────────────────────────────────────── */
 
@@ -76,6 +86,11 @@ static void create_face(void)
 
     /* ── Mouth: tiny dark-grey rounded rect ── */
     make_rect(scr, 28, 18, 6, 0x4A4A4A, LV_OPA_COVER, 0, 86);
+
+    s_status = lv_label_create(scr);
+    lv_label_set_text(s_status, "--%");
+    lv_obj_set_style_text_color(s_status, lv_color_hex(0xFFFFFF), 0);
+    lv_obj_align(s_status, LV_ALIGN_BOTTOM_MID, 0, -12);
 }
 
 /* ── Display task ───────────────────────────────────────── */
@@ -98,7 +113,22 @@ void display_task(void *pvParameters)
     create_face();
     ESP_LOGI(TAG, "Face drawn");
 
+    int shown_moisture = -2;
+    int shown_pump = -1;
     while (1) {
+        int moisture = s_moisture;
+        int pump_on = s_pump_on;
+        if (s_status && (moisture != shown_moisture || pump_on != shown_pump)) {
+            char text[24];
+            if (moisture < 0) {
+                snprintf(text, sizeof(text), "--%%");
+            } else {
+                snprintf(text, sizeof(text), "%d%%  %s", moisture, pump_on ? "PUMP" : "idle");
+            }
+            lv_label_set_text(s_status, text);
+            shown_moisture = moisture;
+            shown_pump = pump_on;
+        }
         lv_task_handler();
         vTaskDelay(pdMS_TO_TICKS(10));
     }

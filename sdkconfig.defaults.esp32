@@ -1,0 +1,5 @@
+# ESP32 flash configuration
+# partitions.csv uses the full 4MB (factory + two OTA slots + SPIFFS).
+CONFIG_ESPTOOLPY_FLASHMODE_DIO=y
+CONFIG_ESPTOOLPY_FLASHFREQ_80M=y
+CONFIG_ESPTOOLPY_FLASHSIZE_4MB=y

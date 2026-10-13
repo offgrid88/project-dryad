@@ -1,6 +1,8 @@
 idf_component_register(
     SRCS "main.c"
          "moisture_sensor.c"
+         "pump_logic.c"
+         "pump.c"
          "display.c"
     INCLUDE_DIRS "."
     REQUIRES "driver"
