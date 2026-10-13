@@ -29,7 +29,8 @@ Project Dryad is an IoT plant monitoring system that keeps your plants healthy b
 | Component | Description | GPIO |
 |-----------|-------------|------|
 | ESP32-C6/C3 | Main controller with WiFi 6 support | - |
-| Moisture Sensor | Capacitive soil moisture sensor | GPIO0 (ADC1_CH0) |
+| Moisture Sensor | Capacitive soil moisture sensor | S3: GPIO4 · C3/C6: GPIO0 |
+| Pump driver | Mini L298 ENA / IN1 (IN2 tied to GND) | GPIO6 PWM, GPIO10 direction |
 | Display | [MSP0963 ST7789](https://2btrading.tn/accueil/9488-module-d-affichage-circulaire-096-240x198-msp0963-st7789-pour-raspberry-stm32-.html) | I2C pins |
 | Environmental Sensors | Temperature, humidity, light | Various |
 | Status LEDs | System status indicators | Configurable |
@@ -87,6 +88,24 @@ Key settings:
 - **WiFi credentials** - Network connection
 - **MQTT broker** - Remote monitoring endpoint
 - **Sensor calibration** - Adjust DRY_VALUE and WET_VALUE for your sensor
+- **Pump thresholds** - `PUMP_ON_BELOW_PERCENT` (35) and `PUMP_OFF_ABOVE_PERCENT` (45) in `main/pump.h`
+
+## Pump
+
+The firmware reads moisture every 2 seconds. Below 35% it enables the pump; at 45% or after 20 seconds it stops, then waits at least 60 seconds before it can run again. PWM is 70% so a small pump is not slammed to full speed.
+
+Wire a mini L298 (one direction only):
+
+| L298 pin | Connection |
+|----------|------------|
+| ENA | GPIO6 (1 kHz PWM) |
+| IN1 | GPIO10 |
+| IN2 | GND |
+| OUT1 / OUT2 | Pump motor |
+| +12 V / +5 V | Pump supply, not the 3.3 V pin |
+| GND | ESP32 GND |
+
+An L298 drops about 1.5–2 V and runs warm. For a one-way pump, a logic-level MOSFET (AO3400A, or IRLZ44N for a larger motor) plus a Schottky diode across the pump is smaller, cooler, and wastes less of the battery. Define `PUMP_DRIVER_MOSFET=1` and drive the gate from GPIO6; PWM then runs at 20 kHz. A TB6612FNG or DRV8870 module is the packaged version of that idea if you still want a module instead of a discrete MOSFET.
 
 ## 🚀 CI/CD
 

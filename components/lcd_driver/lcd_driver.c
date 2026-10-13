@@ -181,7 +181,11 @@ esp_lcd_panel_io_handle_t lcd_get_io_handle(void) { return s_io_handle; }
  * ============================================================ */
 #else
 
-esp_err_t lcd_init(void)                                             { return ESP_OK; }
+esp_err_t lcd_init(void)
+{
+    ESP_LOGW(TAG, "No local display on this target; moisture and pump still run");
+    return ESP_ERR_NOT_SUPPORTED;
+}
 void lcd_draw_bitmap(int x1, int y1, int x2, int y2, const void *d) { (void)x1;(void)y1;(void)x2;(void)y2;(void)d; }
 void lcd_clear(uint16_t color)                                       { (void)color; }
 void lcd_draw_pixel(int16_t x, int16_t y, uint16_t c)               { (void)x;(void)y;(void)c; }
