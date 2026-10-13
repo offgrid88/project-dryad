@@ -31,11 +31,13 @@
 <body>
 <aside>
   <h1><span>Dryad</span> CAD</h1>
-  <p class="sub">Parametric 3D-print body. The electronics bay fits an ESP32-S3, C6 or C3 DevKit plus the pump driver. Only the collar follows the vase; only the cradle follows the bottle. Units: mm.</p>
+  <p class="sub">Parametric 3D-print body. The electronics pod is rounded, with a low crown. It fits an ESP32-S3, C6 or C3 DevKit plus the pump driver. Turn the screen off for a closed lid: power switch and USB-C only. Units: mm.</p>
   <div class="key">
     <label>Vase outer Ø <input type="number" id="vaseD" step="1"></label>
     <label>Bottle Ø (100 ml) <input type="number" id="bottleD" step="0.5"></label>
+    <label><span><input type="checkbox" id="screenOn" checked> Screen in the lid</span></label>
   </div>
+  <p class="sub" id="screenNote">Uncheck for a closed lid. The side wall keeps the on/off switch and the charging port.</p>
   <div id="warn"></div>
   <div class="row">
     <button class="primary" id="dlAll">Assembly STL</button>

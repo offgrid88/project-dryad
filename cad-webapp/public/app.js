@@ -6,8 +6,8 @@ import { DEFAULTS, build, volumeMm3, printPlate, printOrient } from '/src/cad.js
 THREE.Object3D.DEFAULT_UP.set(0, 0, 1); // Z-up, same as slicers
 
 const PARTS = {
-  housing: { label: 'Housing', color: '#8fa98f', explode: [0, 0, 0] },
-  panel: { label: 'Front panel', color: '#a6b8a6', explode: [0, 70, 0] },
+  housing: { label: 'Housing', color: '#c4b6a2', explode: [0, 0, 0] },
+  panel: { label: 'Front lid', color: '#f6f3ec', explode: [0, 70, 0] },
   collar: { label: 'Vase collar', color: '#c9a66b', explode: [0, -70, 0] },
   arm: { label: 'Sensor arm', color: '#7fa6c9', explode: [0, 0, 60] },
   cradle: { label: 'Bottle cradle', color: '#c98f8f', explode: [70, 0, 0] },
@@ -15,7 +15,7 @@ const PARTS = {
 // Numeric inputs grouped for the side panel.
 const GROUPS = {
   'Vase collar': ['clearance', 'ringT', 'ringH', 'padT', 'rimGap'],
-  'Housing': ['W', 'D', 'H', 'wall', 'topT', 'panelT'],
+  'Housing': ['W', 'D', 'H', 'wall', 'topT', 'panelT', 'cornerR', 'crownH'],
   'Screen': ['screenW', 'screenH', 'screenT', 'windowW', 'windowH', 'windowDz'],
   'Boards': ['espW', 'espH', 'espT', 'chgW', 'chgH', 'chgT', 'dcW', 'dcH', 'dcT', 'drvL', 'drvW', 'drvH'],
   'Battery / pump / switch': ['batL', 'batD', 'pumpL', 'pumpW', 'pumpH', 'swW', 'swH'],
@@ -27,6 +27,7 @@ const $ = (id) => document.getElementById(id);
 const canvas = $('view');
 const renderer = new THREE.WebGLRenderer({ canvas, antialias: true });
 renderer.setPixelRatio(devicePixelRatio);
+renderer.setClearColor(0xe4ebe3, 1);
 const scene = new THREE.Scene();
 const camera = new THREE.PerspectiveCamera(40, 1, 1, 3000);
 camera.position.set(330, 330, 120);
@@ -38,7 +39,7 @@ const grid = new THREE.GridHelper(600, 30, 0x889988, 0xaabbaa); grid.rotation.x 
 grid.material.transparent = true; grid.material.opacity = 0.35; scene.add(grid);
 
 let params = { ...DEFAULTS };
-try { params = { ...params, ...JSON.parse(localStorage.getItem('dryad-cad') || '{}') }; } catch {}
+try { params = { ...params, ...JSON.parse(localStorage.getItem('dryad-cad-2') || '{}') }; } catch {}
 let model = null;                 // result of build()
 const groups = {};                // part name -> THREE.Group (solid + ghosts)
 const ghostMeshes = [];
@@ -78,7 +79,7 @@ function rebuild() {
     ghostMeshes.length = 0;
     for (const [name, def] of Object.entries(PARTS)) {
       const grp = new THREE.Group();
-      grp.add(new THREE.Mesh(model.parts[name], new THREE.MeshStandardMaterial({ color: def.color, roughness: 0.6, flatShading: false })));
+      grp.add(new THREE.Mesh(model.parts[name], new THREE.MeshStandardMaterial({ color: def.color, roughness: 0.48, metalness: 0.02 })));
       for (const g of model.ghosts.filter((x) => x.part === name)) { const m = ghostMesh(g); ghostMeshes.push(m); grp.add(m); }
       groups[name] = grp; scene.add(grp);
     }
@@ -137,11 +138,18 @@ function bind(input, key) {
     const v = parseFloat(input.value);
     if (!Number.isFinite(v) || v <= 0) return;
     params[key] = v;
-    try { localStorage.setItem('dryad-cad', JSON.stringify(params)); } catch {}
+    try { localStorage.setItem('dryad-cad-2', JSON.stringify(params)); } catch {}
     clearTimeout(timer); timer = setTimeout(rebuild, 400);
   };
 }
 bind($('vaseD'), 'vaseD'); bind($('bottleD'), 'bottleD');
+const screenBox = $('screenOn');
+screenBox.checked = params.screen !== 0 && params.screen !== false;
+screenBox.onchange = () => {
+  params.screen = screenBox.checked ? 1 : 0;
+  try { localStorage.setItem('dryad-cad-2', JSON.stringify(params)); } catch {}
+  clearTimeout(timer); timer = setTimeout(rebuild, 40);
+};
 for (const [title, keys] of Object.entries(GROUPS)) {
   const d = document.createElement('details');
   d.innerHTML = `<summary>${title}</summary>` + keys.map((k) => `<label>${k}<input type="number" step="any" data-k="${k}"></label>`).join('');

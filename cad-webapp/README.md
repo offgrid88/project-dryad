@@ -16,8 +16,8 @@ Set the **vase Ø** and **bottle Ø**, orbit the preview, then download STLs
 
 | Part | Depends on | Notes |
 |------|-----------|-------|
-| Housing | nothing | Compact electronics bay (82×42×86 mm). One pocket fits an ESP32-S3-DevKitC-1 (70×28 mm) and the smaller C6 and C3 DevKits, plus the USB-C charger, 3.7→5 V DC-DC, mini L298, battery and pump. Cut-outs: USB-C, switch, pump inlet/outlet |
-| Front panel | nothing | Screen window + screen retaining posts |
+| Housing | nothing | Rounded pod: 10 mm corner radius and a 9 mm crown (about 86×43×101 mm). One pocket fits an ESP32-S3-DevKitC-1 (70×28 mm) and the smaller C6 and C3 DevKits, plus the USB-C charger, 3.7→5 V DC-DC, mini L298, battery and pump. Side cut-outs: USB-C and the on/off switch, plus the pump tubes |
+| Front lid | screen on/off | Checkbox in the side panel. On: rounded screen window and a shallow bezel. Off: a closed lid with no aperture. The switch and the charging port stay on the side wall either way |
 | Vase collar | **vase Ø** | Split C-clamp (M4 bolt + nut trap) on a flat pad that screws to the housing back |
 | Sensor arm | nothing | Reaches over the rim; slot for capacitive sensor + tube channel for the pump outlet |
 | Bottle cradle | **bottle Ø** | Cup for a ~100 ml bottle, front slit for odd shapes, tube notch for the pump inlet |
