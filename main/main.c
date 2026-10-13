@@ -3,12 +3,14 @@
 #include "esp_log.h"
 #include "moisture_sensor.h"
 #include "display.h"
+#include "pump.h"
 
 static const char *TAG = "Main";
 
 void app_main(void)
 {
     ESP_LOGI(TAG, "Dryad starting");
+    pump_init();
 
     BaseType_t ret;
 

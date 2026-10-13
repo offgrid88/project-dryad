@@ -21,6 +21,14 @@ for (const vaseD of [70, 110, 200]) {
     if (!(vol > 1) || tris < 12) { console.log('  !! suspicious mesh'); failed = true; }
   }
   if (vaseD === 110) {
+    const { layout: L, params, warnings } = build({ vaseD });
+    const espL = L.esp[1] - L.esp[0], espW = L.esp[5] - L.esp[4];
+    if (espL < 70 || espW < 28) { console.log('  !! ESP pocket smaller than S3 DevKit 70x28'); failed = true; }
+    const h = parts.housing; h.computeBoundingBox();
+    const hs = new THREE.Vector3(); h.boundingBox.getSize(hs);
+    console.log(`  enclosure ${hs.x.toFixed(1)}x${hs.y.toFixed(1)}x${hs.z.toFixed(1)} (was 88x52x115)`);
+    if (!(hs.x < 88 && hs.y < 52 && hs.z < 115)) { console.log('  !! enclosure did not shrink'); failed = true; }
+    if (warnings.length) { console.log('  !! ' + warnings.join(' | ')); failed = true; }
     const plate = printPlate(parts), grp = new THREE.Group();
     for (const g of Object.values(plate)) grp.add(new THREE.Mesh(g));
     const stl = new STLExporter().parse(grp, { binary: true });

@@ -17,7 +17,7 @@ const GROUPS = {
   'Vase collar': ['clearance', 'ringT', 'ringH', 'padT', 'rimGap'],
   'Housing': ['W', 'D', 'H', 'wall', 'topT', 'panelT'],
   'Screen': ['screenW', 'screenH', 'screenT', 'windowW', 'windowH', 'windowDz'],
-  'Boards': ['espW', 'espH', 'espT', 'chgW', 'chgH', 'chgT', 'dcW', 'dcH', 'dcT'],
+  'Boards': ['espW', 'espH', 'espT', 'chgW', 'chgH', 'chgT', 'dcW', 'dcH', 'dcT', 'drvL', 'drvW', 'drvH'],
   'Battery / pump / switch': ['batL', 'batD', 'pumpL', 'pumpW', 'pumpH', 'swW', 'swH'],
   'Bottle cradle': ['cupH', 'cupWall', 'bottleMl'],
   'Sensor arm': ['armW', 'armT', 'inset', 'slotW', 'slotT', 'tubeOD'],

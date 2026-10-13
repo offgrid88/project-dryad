@@ -2,6 +2,7 @@
 #include "freertos/task.h"
 #include "moisture_sensor.h"
 #include "display.h"
+#include "pump.h"
 #include "esp_adc/adc_oneshot.h"
 #include "esp_adc/adc_cali.h"
 #include "esp_adc/adc_cali_scheme.h"
@@ -12,6 +13,7 @@ static const char *TAG = "moisture_sensor";
 // TODO: these values need calibration
 #define DRY_VALUE 1200
 #define WET_VALUE 3600
+#define SAMPLE_PERIOD_MS 2000
 
 #define ADC_UNIT    ADC_UNIT_1
 #define ADC_ATTEN   ADC_ATTEN_DB_12
@@ -104,7 +106,8 @@ void moisture_sensor_task(void* pvParameters) {
 
     while (1) {
         int pct = read_moisture_percent();
-        display_set_moisture(pct);
-        vTaskDelay(pdMS_TO_TICKS(2000));
+        pump_update(pct, SAMPLE_PERIOD_MS);
+        display_set_status(pct, pump_is_running());
+        vTaskDelay(pdMS_TO_TICKS(SAMPLE_PERIOD_MS));
     }
 }

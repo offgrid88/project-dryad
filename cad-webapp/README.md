@@ -16,7 +16,7 @@ Set the **vase Ø** and **bottle Ø**, orbit the preview, then download STLs
 
 | Part | Depends on | Notes |
 |------|-----------|-------|
-| Housing | nothing | Same for every vase. Pockets: ESP32, USB-C charger, 3.7→5 V DC-DC, battery, pump, screen; cut-outs: USB-C, switch, pump inlet/outlet |
+| Housing | nothing | Compact electronics bay (82×42×86 mm). One pocket fits an ESP32-S3-DevKitC-1 (70×28 mm) and the smaller C6 and C3 DevKits, plus the USB-C charger, 3.7→5 V DC-DC, mini L298, battery and pump. Cut-outs: USB-C, switch, pump inlet/outlet |
 | Front panel | nothing | Screen window + screen retaining posts |
 | Vase collar | **vase Ø** | Split C-clamp (M4 bolt + nut trap) on a flat pad that screws to the housing back |
 | Sensor arm | nothing | Reaches over the rim; slot for capacitive sensor + tube channel for the pump outlet |
@@ -30,3 +30,12 @@ hardware and are not exported.
 
 `src/cad.js` is the whole model (runs in the browser and in Node);
 `layout()` holds the component positions.
+
+## Desktop AppImage
+
+```bash
+./packaging/build-appimage.sh
+./dist/DryadCAD-x86_64.AppImage
+```
+
+The image bundles Node and starts the generator on http://127.0.0.1:8080, then opens it in a browser.

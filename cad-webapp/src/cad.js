@@ -13,15 +13,19 @@ import { Brush, Evaluator, ADDITION, SUBTRACTION } from 'three-bvh-csg';
 export const DEFAULTS = {
   // vase collar (the only vase-dependent part)
   vaseD: 110, clearance: 0.5, ringT: 4, ringH: 30, padT: 6, rimGap: 4,
-  // housing
-  W: 88, D: 52, H: 115, wall: 2.4, topT: 6, panelT: 3,
+  // Electronics enclosure. Sized around the largest of ESP32-S3-DevKitC-1
+  // (70×28 mm), ESP32-C6-DevKitC-1 and ESP32-C3-DevKitM-1, plus the pump,
+  // 18650, charger, DC-DC and a mini L298. Smaller than the previous
+  // 88×52×115 mm shell on every axis.
+  W: 82, D: 42, H: 86, wall: 2.2, topT: 4, panelT: 2.4,
   // components (pocket sizes, edit to match your modules)
   screenW: 50, screenH: 70, screenT: 6, windowW: 43, windowH: 57, windowDz: 3,
-  espW: 28, espH: 51, espT: 13,
-  chgW: 26, chgH: 17, chgT: 8,
-  dcW: 22, dcH: 17, dcT: 8,
-  batL: 67, batD: 19,
-  pumpL: 38, pumpW: 22, pumpH: 26,
+  espW: 72, espH: 30, espT: 14,   // 70×28 DevKit + 1 mm, 14 mm with pin headers
+  chgW: 26, chgH: 18, chgT: 8,
+  dcW: 22, dcH: 18, dcT: 8,
+  batL: 68, batD: 20,
+  pumpL: 38, pumpW: 22, pumpH: 24,
+  drvL: 36, drvW: 16, drvH: 18,   // mini L298 module
   swW: 13.5, swH: 19.8,
   // reservoir cradle (the only bottle-dependent part)
   bottleD: 44, cupH: 45, cupWall: 2.4, bottleMl: 100,
@@ -54,23 +58,26 @@ const S = (a, ...r) => r.reduce((acc, b) => ev.evaluate(acc, b, SUBTRACTION), a)
 // Component boxes [x0,x1,y0,y1,z0,z1] shared by the CAD and the preview ghosts.
 export function layout(p) {
   const iw = p.W / 2 - p.wall;
-  const yb = p.wall + 3; // 3 mm standoff from the back wall (screw heads live there)
+  const yb = p.wall + 1; // board sits just off the back wall
   const floor = -p.H + p.wall;
-  const zc = -p.topT - 3 - p.screenH / 2;
-  const shelfTop = zc - p.screenH / 2 - 3;
-  const esp = [6, 6 + p.espW, yb, yb + p.espT, -9 - p.espH, -9];
-  const chg = [-iw, -iw + p.chgW, yb, yb + p.chgT, -13 - p.chgH, -13];
-  const dcTop = chg[4] - 5;
-  const dc = [-iw, -iw + p.dcW, yb, yb + p.dcT, dcTop - p.dcH, dcTop];
-  const pump = [-p.pumpL / 2, p.pumpL / 2, p.wall + 1, p.wall + 1 + p.pumpW, floor, floor + p.pumpH];
-  const by0 = pump[3] + 3;
-  const bat = [-p.batL / 2, p.batL / 2, by0, by0 + p.batD + 2, floor, floor + p.batD + 2];
+  // Screen is on the front panel and spans most of the height. The boards,
+  // pump and cell sit behind it, so the shell does not have to grow by the
+  // screen height again.
+  const zc = -p.topT - 2 - p.screenH / 2;
+  const esp = [-p.espW / 2, p.espW / 2, yb, yb + p.espT, -p.topT - 2 - p.espH, -p.topT - 2];
+  // Charger on the left wall so the USB-C cut meets it. Driver on the right.
+  const chg = [-iw, -iw + p.chgW, esp[3] + 1, esp[3] + 1 + p.chgT, esp[5] - 2 - p.chgH, esp[5] - 2];
+  const drv = [iw - p.drvL, iw, esp[3] + 1, esp[3] + 1 + p.drvW, esp[4], esp[4] + p.drvH];
+  const bat = [-p.batL / 2, p.batL / 2, yb, yb + p.batD, floor, floor + p.batD];
+  const pump = [-p.pumpL / 2, p.pumpL / 2, yb, yb + p.pumpW, bat[5] + 2, bat[5] + 2 + p.pumpH];
+  // In front of the pump so the module does not share a column with the cell.
+  const dc = [-iw, -iw + p.dcW, pump[3] + 1, pump[3] + 1 + p.dcT, chg[4] - 2 - p.dcH, chg[4] - 2];
   const screen = [-p.screenW / 2, p.screenW / 2, p.D - p.screenT, p.D, zc - p.screenH / 2, zc + p.screenH / 2];
-  const sw = { y: p.D / 2, z: dc[4] - 18 };
-  const usb = { y: yb + 3.2, z: (chg[4] + chg[5]) / 2 };
+  const sw = { y: (bat[2] + bat[3]) / 2, z: (bat[4] + bat[5]) / 2 };
+  const usb = { y: (chg[2] + chg[3]) / 2, z: (chg[4] + chg[5]) / 2 };
   const inlet = { y: (pump[2] + pump[3]) / 2, z: -p.H + p.cupH - 5 };
   const ys = -(p.padT + p.ringT + p.inset);
-  return { iw, yb, floor, zc, shelfTop, esp, chg, dc, pump, bat, screen, sw, usb, inlet, ys };
+  return { iw, yb, floor, zc, esp, chg, dc, drv, pump, bat, screen, sw, usb, inlet, ys };
 }
 
 // Corner posts + pegs that locate a rectangular board. axis 'y': board mounted on the
@@ -99,11 +106,8 @@ function buildHousing(p, L) {
   const add = [];
   // front-panel screw posts (full depth, 4 corners)
   for (const sx of [-1, 1]) for (const z of postZ) add.push(cyl('y', 3, wall - 0.5, D, sx * postX, z, 24));
-  // shelf between screen zone and pump/battery zone
-  add.push(S(box(-iw, iw, wall - 0.5, D, L.shelfTop - 2, L.shelfTop),
-    box(-8, 8, 6, 18, L.shelfTop - 3, L.shelfTop + 1),    // pump-outlet tube pass
-    box(-36, -16, 6, 16, L.shelfTop - 3, L.shelfTop + 1))); // wire pass
   add.push(...cradle(L.esp, 'y', wall), ...cradle(L.chg, 'y', wall), ...cradle(L.dc, 'y', wall));
+  add.push(...cradle(L.drv, 'y', wall));
   add.push(...cradle(L.pump, 'z', wall), ...cradle(L.bat, 'z', wall, 1.6));
   h = U(h, ...add);
 
@@ -205,9 +209,10 @@ export function ghosts(p, L) {
   const B = (part, label, color, b) => ({ part, label, color, shape: 'box', b });
   const C = (part, label, color, axis, r, a0, a1, c1, c2) => ({ part, label, color, shape: 'cyl', axis, r, a0, a1, c1, c2 });
   return [
-    B('housing', 'ESP32', '#2e7d32', L.esp),
+    B('housing', 'ESP32-S3 / C6 / C3', '#2e7d32', L.esp),
     B('housing', 'USB-C charger', '#1565c0', L.chg),
     B('housing', 'DC-DC 3.7→5V', '#ef6c00', L.dc),
+    B('housing', 'L298 driver', '#6d4c41', L.drv),
     B('housing', 'Pump', '#6a1b9a', L.pump),
     C('housing', 'Battery', '#c62828', 'x', p.batD / 2, L.bat[0], L.bat[1], (L.bat[2] + L.bat[3]) / 2, L.bat[4] + (p.batD + 2) / 2),
     B('housing', 'Switch', '#212121', [-L.iw - 3, -L.iw + 15, L.sw.y - p.swW / 2, L.sw.y + p.swW / 2, L.sw.z - p.swH / 2, L.sw.z + p.swH / 2]),
@@ -224,6 +229,16 @@ export function validate(p) {
   if (p.vaseD < 2 * p.inset) w.push('Sensor reach is larger than the vase diameter; reduce "sensor inset".');
   if (p.vaseD > 220) w.push('Vase Ø > 220 mm: collar will be large and needs more than one housing screw row.');
   if (p.bottleD < 25 || p.bottleD > 70) w.push('Bottle Ø outside 25–70 mm: check the cradle fits the 100 ml bottle.');
+  if (p.espW < 70 || p.espH < 28) w.push('ESP pocket is smaller than an ESP32-S3-DevKitC-1 (70×28 mm).');
+  if (p.W < p.espW + 2 * p.wall + 2) w.push('Housing is narrower than the ESP pocket.');
+  const L = layout(p);
+  const boxes = [L.esp, L.chg, L.dc, L.drv, L.pump, L.bat];
+  for (const b of boxes) {
+    if (b[0] < -p.W / 2 || b[1] > p.W / 2 || b[2] < 0 || b[3] > p.D || b[4] < -p.H || b[5] > 0) {
+      w.push('A component pocket sticks out of the electronics enclosure.');
+      break;
+    }
+  }
   return w;
 }
 
