@@ -8,16 +8,18 @@
 // Only the COLLAR depends on the vase, only the CRADLE on the bottle.
 // Housing, front panel and arm are the same for every vase.
 import * as THREE from 'three';
-import { Brush, Evaluator, ADDITION, SUBTRACTION } from 'three-bvh-csg';
+import { Brush, Evaluator, ADDITION, SUBTRACTION, INTERSECTION } from 'three-bvh-csg';
 
 export const DEFAULTS = {
   // vase collar (the only vase-dependent part)
   vaseD: 110, clearance: 0.5, ringT: 4, ringH: 30, padT: 6, rimGap: 4,
-  // Electronics enclosure. Sized around the largest of ESP32-S3-DevKitC-1
-  // (70×28 mm), ESP32-C6-DevKitC-1 and ESP32-C3-DevKitM-1, plus the pump,
-  // 18650, charger, DC-DC and a mini L298. Smaller than the previous
-  // 88×52×115 mm shell on every axis.
-  W: 82, D: 42, H: 86, wall: 2.2, topT: 4, panelT: 2.4,
+  // Soft electronics pod. Rounded vertical corners and a low crown, still
+  // inside the old 88×52×115 mm box. Wall and top are thick enough that the
+  // corner radius does not break into the component bay.
+  W: 86, D: 43, H: 92, wall: 4, topT: 4.6, panelT: 2.6,
+  cornerR: 10, crownH: 9,
+  // 1 = screen window in the lid, 0 = closed lid (switch + charge port only)
+  screen: 1,
   // components (pocket sizes, edit to match your modules)
   screenW: 50, screenH: 70, screenT: 6, windowW: 43, windowH: 57, windowDz: 3,
   espW: 72, espH: 30, espT: 14,   // 70×28 DevKit + 1 mm, 14 mm with pin headers
@@ -54,6 +56,56 @@ function cyl(axis, r, a0, a1, c1, c2, seg = SEG) {
 }
 const U = (a, ...r) => r.reduce((acc, b) => ev.evaluate(acc, b, ADDITION), a);
 const S = (a, ...r) => r.reduce((acc, b) => ev.evaluate(acc, b, SUBTRACTION), a);
+const I = (a, b) => ev.evaluate(a, b, INTERSECTION);
+
+// Largest corner radius that keeps `skin` mm of plastic outside the rectangular bay.
+function clampCorner(p, skin = 1.2) {
+  let r = Math.min(p.cornerR, p.W / 2 - 8, p.H / 2 - 8);
+  const limit = (dx, dz) => {
+    while (r > 2) {
+      if ((r - dx) * (r - dx) + (r - dz) * (r - dz) <= (r - skin) * (r - skin)) return;
+      r -= 0.25;
+    }
+  };
+  limit(p.wall, p.topT);
+  limit(p.wall, p.wall);
+  return Math.round(r * 100) / 100;
+}
+
+// Arch in the front view: side edges stay near z=0, the middle rises by crownH.
+// `drop` lowers the whole arch (inner ceiling, or the lid sitting under the lip).
+function crownBrush(p, drop = 0) {
+  const R = p.crownR;
+  const zc = p.crownH - drop - R;
+  return cyl('y', R, -4, p.D + p.panelT + 8, 0, zc, 80);
+}
+
+function shapeOf(raw) {
+  const p = { ...raw };
+  p.crownH = Math.min(14, Math.max(1, p.crownH));
+  const d = p.W / 2;
+  p.crownR = (d * d + p.crownH * p.crownH) / (2 * p.crownH);
+  p.cornerAsked = p.cornerR;
+  p.cornerR = clampCorner(p);
+  p.screenOn = !(p.screen === 0 || p.screen === false);
+  return p;
+}
+
+// Rounded rectangle extruded along `axis`. Cross-section axes are
+// y: (x,z), x: (y,z), z: (x,y).
+function roundRect(axis, a0, a1, u0, u1, v0, v1, r, seg = 32) {
+  r = Math.min(Math.max(r, 0), (u1 - u0) / 2 - 0.05, (v1 - v0) / 2 - 0.05);
+  const slab = (uu0, uu1, vv0, vv1) => {
+    if (axis === 'y') return box(uu0, uu1, a0, a1, vv0, vv1);
+    if (axis === 'x') return box(a0, a1, uu0, uu1, vv0, vv1);
+    return box(uu0, uu1, vv0, vv1, a0, a1);
+  };
+  if (!(r > 0.4)) return slab(u0, u1, v0, v1);
+  const parts = [slab(u0 + r, u1 - r, v0, v1), slab(u0, u1, v0 + r, v1 - r)];
+  for (const [cu, cv] of [[u0 + r, v0 + r], [u1 - r, v0 + r], [u0 + r, v1 - r], [u1 - r, v1 - r]])
+    parts.push(cyl(axis, r, a0, a1, cu, cv, seg));
+  return U(parts[0], ...parts.slice(1));
+}
 
 // Component boxes [x0,x1,y0,y1,z0,z1] shared by the CAD and the preview ghosts.
 export function layout(p) {
@@ -73,8 +125,14 @@ export function layout(p) {
   // In front of the pump so the module does not share a column with the cell.
   const dc = [-iw, -iw + p.dcW, pump[3] + 1, pump[3] + 1 + p.dcT, chg[4] - 2 - p.dcH, chg[4] - 2];
   const screen = [-p.screenW / 2, p.screenW / 2, p.D - p.screenT, p.D, zc - p.screenH / 2, zc + p.screenH / 2];
-  const sw = { y: (bat[2] + bat[3]) / 2, z: (bat[4] + bat[5]) / 2 };
-  const usb = { y: (chg[2] + chg[3]) / 2, z: (chg[4] + chg[5]) / 2 };
+  // Keep the rocker and the USB-C slot on the flat part of the rounded side wall.
+  const clampZ = (z, half) => {
+    const lo = -p.H + p.cornerR + half + 1.5;
+    const hi = -p.cornerR - half - 1.5;
+    return Math.min(hi, Math.max(lo, z));
+  };
+  const sw = { y: (bat[2] + bat[3]) / 2, z: clampZ((bat[4] + bat[5]) / 2, p.swH / 2) };
+  const usb = { y: (chg[2] + chg[3]) / 2, z: clampZ((chg[4] + chg[5]) / 2, 6) };
   const inlet = { y: (pump[2] + pump[3]) / 2, z: -p.H + p.cupH - 5 };
   const ys = -(p.padT + p.ringT + p.inset);
   return { iw, yb, floor, zc, esp, chg, dc, drv, pump, bat, screen, sw, usb, inlet, ys };
@@ -99,43 +157,68 @@ function cradle(c, axis, wallY, p = 2) {
 }
 
 function buildHousing(p, L) {
-  const { W, D, H, wall, topT } = p, iw = L.iw;
-  const postX = iw - 3, postZ = [-topT - 3, -H + wall + 3];
-  let h = box(-W / 2, W / 2, 0, D, -H, 0);
-  h = S(h, box(-iw, iw, wall, D + 1, -H + wall, -topT));
+  const { W, D, H, wall, topT } = p, iw = L.iw, r = p.cornerR;
+  // Outer pod: rounded front silhouette, then a crown that rises in the middle.
+  let h = roundRect('y', 0, D, -W / 2, W / 2, -H, p.crownH + 1, r, 36);
+  h = I(h, crownBrush(p, -0.2));
+  // Rectangular bay (components sit in the corners of this, not in the fillet)
+  // plus a ceiling that follows the crown so the cap is a shell, not a solid blob.
+  const bay = box(-iw, iw, wall, D + 1, -H + wall, -topT);
+  let cap = box(-iw + 0.4, iw - 0.4, wall, D + 1, -topT - 1, p.crownH + 2);
+  cap = I(cap, crownBrush(p, topT));
+  h = S(h, bay, cap);
+
+  const bossX = iw - 1.6, bossR = 2.5;
+  const bossZ = [-r - 7, -H + r + 9];
   const add = [];
-  // front-panel screw posts (full depth, 4 corners)
-  for (const sx of [-1, 1]) for (const z of postZ) add.push(cyl('y', 3, wall - 0.5, D, sx * postX, z, 24));
+  for (const sx of [-1, 1]) for (const z of bossZ)
+    add.push(cyl('y', bossR, D - 8, D - 0.3, sx * bossX, z, 20));
   add.push(...cradle(L.esp, 'y', wall), ...cradle(L.chg, 'y', wall), ...cradle(L.dc, 'y', wall));
   add.push(...cradle(L.drv, 'y', wall));
   add.push(...cradle(L.pump, 'z', wall), ...cradle(L.bat, 'z', wall, 1.6));
   h = U(h, ...add);
 
   const cut = [];
-  for (const sx of [-1, 1]) for (const z of postZ) cut.push(cyl('y', 1.3, D - 12, D + 1, sx * postX, z, 16)); // panel pilots
-  for (const sx of [-1, 1]) for (const z of [-11, -27]) cut.push(cyl('y', 1.7, -1, wall + 1, sx * (W / 2 - 12), z, 16)); // collar screws
-  cut.push(cyl('z', 3.2, -topT - 1, 1, 0, 12, 24)); // pump outlet tube -> arm
-  for (const sx of [-1, 1]) cut.push(cyl('z', 1.7, -topT - 1, 1, sx * 9, 17, 16)); // arm screws
-  cut.push(box(-W / 2 - 1, -iw + 1, L.usb.y - 2.3, L.usb.y + 2.3, L.usb.z - 5.5, L.usb.z + 5.5)); // USB-C
-  cut.push(box(-W / 2 - 1, -iw + 1, L.sw.y - p.swW / 2, L.sw.y + p.swW / 2, L.sw.z - p.swH / 2, L.sw.z + p.swH / 2)); // switch
-  cut.push(cyl('x', 3.2, iw - 1, W / 2 + 1, L.inlet.y, L.inlet.z, 24)); // pump inlet tube -> bottle
-  for (const y of [6, 30]) cut.push(cyl('x', 1.7, iw - 1, W / 2 + 1, y, -H + 20, 16)); // cradle screws
+  for (const sx of [-1, 1]) for (const z of bossZ)
+    cut.push(cyl('y', 1.25, D - 7, D + 1, sx * bossX, z, 16));
+  for (const sx of [-1, 1]) for (const z of [-11, -27])
+    cut.push(cyl('y', 1.7, -1, wall + 1, sx * (W / 2 - 12), z, 16)); // collar screws, matched to the collar pad
+  cut.push(cyl('z', 3.2, -topT - 1, p.crownH + 1, 0, 12, 24)); // pump outlet -> arm
+  for (const sx of [-1, 1]) cut.push(cyl('z', 1.7, -topT - 1, p.crownH + 1, sx * 9, 17, 16));
+  // USB-C slot, with a shallow oval recess so the port reads as a finished detail.
+  cut.push(roundRect('x', -W / 2 - 1, -W / 2 + 0.7, L.usb.y - 4.2, L.usb.y + 4.2, L.usb.z - 7.2, L.usb.z + 7.2, 3.2, 18));
+  cut.push(roundRect('x', -W / 2 - 1, -iw + 1, L.usb.y - 2.2, L.usb.y + 2.2, L.usb.z - 5.2, L.usb.z + 5.2, 2.1, 16));
+  cut.push(roundRect('x', -W / 2 - 1, -W / 2 + 0.7, L.sw.y - p.swW / 2 - 1.4, L.sw.y + p.swW / 2 + 1.4, L.sw.z - p.swH / 2 - 1.4, L.sw.z + p.swH / 2 + 1.4, 3.4, 18));
+  cut.push(roundRect('x', -W / 2 - 1, -iw + 1, L.sw.y - p.swW / 2, L.sw.y + p.swW / 2, L.sw.z - p.swH / 2, L.sw.z + p.swH / 2, 3.2, 18));
+  cut.push(cyl('x', 3.2, iw - 1, W / 2 + 1, L.inlet.y, L.inlet.z, 24));
+  for (const y of [6, 30]) cut.push(cyl('x', 1.7, iw - 1, W / 2 + 1, y, -H + 20, 16));
   return S(h, ...cut);
 }
 
 function buildPanel(p, L) {
-  const { W, D, H, panelT } = p, iw = L.iw;
-  let pl = box(-W / 2, W / 2, D, D + panelT, -H, 0);
-  const [sx0, sx1, , , sz0, sz1] = L.screen;
-  const q = 3, add = [];
-  for (const [px, pz] of [[sx0 - q, sz0 - q], [sx1, sz0 - q], [sx0 - q, sz1], [sx1, sz1]])
-    add.push(box(px, px + q, D - p.screenT, D + 0.5, pz, pz + q));
-  pl = U(pl, ...add);
-  const cut = [box(-p.windowW / 2, p.windowW / 2, D - 1, D + panelT + 1,
-    L.zc + p.windowDz - p.windowH / 2, L.zc + p.windowDz + p.windowH / 2)];
-  for (const sx of [-1, 1]) for (const z of [-p.topT - 3, -H + p.wall + 3])
-    cut.push(cyl('y', 1.7, D - 1, D + panelT + 1, sx * (iw - 3), z, 16));
-  return S(pl, ...cut);
+  const { W, D, H, panelT } = p;
+  const inset = 3.5;
+  const lip = 4.0;
+  const pr = Math.min(8, Math.max(3, p.cornerR - 2));
+  let pl = roundRect('y', D - 0.45, D + panelT, -W / 2 + inset, W / 2 - inset, -H + inset, p.crownH, pr, 32);
+  pl = I(pl, crownBrush(p, lip));
+  const cut = [];
+  const bossX = L.iw - 1.6;
+  for (const sx of [-1, 1]) for (const z of [-p.cornerR - 7, -H + p.cornerR + 9])
+    cut.push(cyl('y', 1.6, D - 1, D + panelT + 1, sx * bossX, z, 16));
+  if (p.screenOn) {
+    const [sx0, sx1, , , sz0, sz1] = L.screen;
+    const q = 3, add = [];
+    for (const [px, pz] of [[sx0 - q, sz0 - q], [sx1, sz0 - q], [sx0 - q, sz1], [sx1, sz1]])
+      add.push(box(px, px + q, D - p.screenT, D + 0.4, pz, pz + q));
+    pl = U(pl, ...add);
+    const wz0 = L.zc + p.windowDz - p.windowH / 2, wz1 = L.zc + p.windowDz + p.windowH / 2;
+    // Seated bezel, then the window itself. Both have soft corners.
+    pl = S(pl, roundRect('y', D + panelT - 0.65, D + panelT + 2, -p.windowW / 2 - 3.5, p.windowW / 2 + 3.5, wz0 - 3.5, wz1 + 3.5, 8, 24));
+    cut.push(roundRect('y', D - 2, D + panelT + 2, -p.windowW / 2, p.windowW / 2, wz0, wz1, 7, 28));
+  }
+  // screen off: the lid stays closed. The on/off switch and the USB-C port are on the side wall.
+  return cut.length ? S(pl, ...cut) : pl;
 }
 
 function buildCollar(p) {
@@ -187,7 +270,8 @@ function buildCradle(p, L) {
 }
 
 export function build(params = {}) {
-  const p = { ...DEFAULTS, ...params };
+  const raw = { ...DEFAULTS, ...params };
+  const p = shapeOf(raw);
   const L = layout(p);
   const geo = {
     housing: buildHousing(p, L),
@@ -216,7 +300,7 @@ export function ghosts(p, L) {
     B('housing', 'Pump', '#6a1b9a', L.pump),
     C('housing', 'Battery', '#c62828', 'x', p.batD / 2, L.bat[0], L.bat[1], (L.bat[2] + L.bat[3]) / 2, L.bat[4] + (p.batD + 2) / 2),
     B('housing', 'Switch', '#212121', [-L.iw - 3, -L.iw + 15, L.sw.y - p.swW / 2, L.sw.y + p.swW / 2, L.sw.z - p.swH / 2, L.sw.z + p.swH / 2]),
-    B('panel', 'Screen', '#00838f', L.screen),
+    ...(p.screenOn ? [B('panel', 'Screen', '#00838f', L.screen)] : []),
     B('arm', 'Moisture sensor', '#f9a825', [-11.5, 11.5, L.ys - 0.8, L.ys + 0.8, p.armT + 4 - 98, p.armT + 4]),
     C('collar', 'Vase', '#8d6e63', 'z', p.vaseD / 2, -p.rimGap - 130, -p.rimGap, 0, yc),
     C('cradle', 'Bottle', '#4fc3f7', 'z', bR, -p.H + 3, -p.H + 3 + bH, bx, L.inlet.y),
@@ -225,6 +309,10 @@ export function ghosts(p, L) {
 
 export function validate(p) {
   const w = [];
+  if (p.cornerAsked != null && p.cornerR + 0.2 < p.cornerAsked)
+    w.push(`Corner radius reduced to ${p.cornerR} mm so the bay wall stays intact.`);
+  if (p.screenOn && (p.windowW > p.W - 16 || p.windowH > p.H - 20))
+    w.push('Screen window is larger than the lid.');
   if (p.vaseD < 60) w.push('Vase Ø < 60 mm: the sensor arm cannot reach inside the pot.');
   if (p.vaseD < 2 * p.inset) w.push('Sensor reach is larger than the vase diameter; reduce "sensor inset".');
   if (p.vaseD > 220) w.push('Vase Ø > 220 mm: collar will be large and needs more than one housing screw row.');
