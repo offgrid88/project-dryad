@@ -13,12 +13,14 @@
 
 ## 🌱 Overview
 
-Project Dryad is an IoT plant monitoring system that keeps your plants healthy by tracking soil moisture and environmental conditions. Built on ESP32-C6/C3 microcontrollers, it sends real-time alerts via MQTT and email when your plants need attention.
+Project Dryad is a plant monitor for ESP32-C6, ESP32-C3, and ESP32-S3. Nodes share moisture and pump state over a Wi-Fi mesh with no router, and the Dryad phone app joins a node to watch, water, and configure it. MQTT is compiled in and left off until a broker exists.
 
 ## ✨ Features
 
 - 📊 **Real-time Monitoring** - Soil moisture, temperature, humidity, and light sensing
-- 📡 **MQTT Communication** - Remote monitoring with efficient data transmission
+- 📡 **Wi-Fi mesh** - Nodes relay status to each other with no home router
+- 📱 **Phone app** - Expo app for monitor, pump control, and configuration
+- 🔌 **MQTT, off by default** - Client is in the firmware; it connects only after you store a broker and turn the switch on
 - 📧 **Email Alerts** - Automatic notifications when plants need water
 - 🔋 **Battery Powered** - Extended operation with low-power design
 - 💡 **Status LEDs** - Visual indicators for offline monitoring
@@ -72,23 +74,22 @@ dryad/
 │   ├── moisture_sensor.*  # Sensor implementation
 │   └── display.*          # Display driver
 ├── .github/workflows/     # CI/CD automation
-├── partitions.csv         # Custom partition table (OTA support)
+├── partitions.csv         # Factory image plus one OTA slot (mesh firmware)
 ├── sdkconfig.defaults     # Default configuration
 └── build.sh              # Build helper script
 ```
 
 ## 🔧 Configuration
 
-Configure WiFi and MQTT settings:
+The phone app writes the plant name, pump thresholds, optional home Wi-Fi, and the MQTT switch into NVS. MQTT stays off until that switch is on and a broker URI is stored.
+
 ```bash
 idf.py menuconfig
 ```
 
 Key settings:
-- **WiFi credentials** - Network connection
-- **MQTT broker** - Remote monitoring endpoint
 - **Sensor calibration** - Adjust DRY_VALUE and WET_VALUE for your sensor
-- **Pump thresholds** - `PUMP_ON_BELOW_PERCENT` (35) and `PUMP_OFF_ABOVE_PERCENT` (45) in `main/pump.h`
+- **Pump thresholds** - `PUMP_ON_BELOW_PERCENT` (35) and `PUMP_OFF_ABOVE_PERCENT` (45) in `main/pump.h`, also changeable from the app
 
 ## Pump
 
@@ -106,6 +107,31 @@ Wire a mini L298 (one direction only):
 | GND | ESP32 GND |
 
 An L298 drops about 1.5–2 V and runs warm. For a one-way pump, a logic-level MOSFET (AO3400A, or IRLZ44N for a larger motor) plus a Schottky diode across the pump is smaller, cooler, and wastes less of the battery. Define `PUMP_DRIVER_MOSFET=1` and drive the gate from GPIO6; PWM then runs at 20 kHz. A TB6612FNG or DRV8870 module is the packaged version of that idea if you still want a module instead of a discrete MOSFET.
+
+## Mesh, phone, and MQTT
+
+Nodes form an ESP-WIFI-MESH named `DRYAD1` (password `dryad-mesh`) on channel 6. No home Wi-Fi is required. Each node broadcasts its moisture and pump state; neighbors remember it and relay a new sequence up to four hops. A phone joins that same network (up to three non-mesh clients) and talks HTTP to the node it associated with, at `http://192.168.4.1`.
+
+| Request | Body | Effect |
+|---------|------|--------|
+| `GET /status` |  | This node, plus peers it has heard |
+| `POST /cmd` | `{"t":"set","on":30,"off":55,"pwm":60}` | Pump thresholds. `on` must stay below `off` |
+| `POST /cmd` | `{"t":"pump","run":1}` | `1` force on, `0` force off, `-1` automatic |
+| `POST /cmd` | `{"t":"cfg","name":"Basil","mqtt":0,"broker":"","ssid":"","pass":""}` | Name, MQTT, optional home router |
+
+A home SSID in `cfg` is optional. When it is set, the mesh root can join that router. Leave it empty to stay fully offline. Changing it restarts the node.
+
+MQTT publishes `dryad/<node-id>/status` and subscribes to `dryad/<node-id>/cmd`, but only when `mqtt` is `1` and `broker` is a URI such as `mqtt://10.0.0.8`. The shipped default is `mqtt` `0` and an empty broker, so the client logs `MQTT present, left disabled` and does not open a socket.
+
+The Android app lives in `dryad-app`. It polls `/status`, posts the commands above, and keeps the last snapshot in on-device storage so the last reading is still visible when the node is out of range. The MQTT switch in Configure ships off.
+
+```bash
+cd dryad-app
+npm install
+npx expo start
+```
+
+On the phone, join Wi-Fi `DRYAD1` / `dryad-mesh`, then open the app. The node address stays `192.168.4.1` unless you change it under Configure.
 
 ## 🚀 CI/CD
 

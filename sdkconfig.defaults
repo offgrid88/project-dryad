@@ -23,8 +23,8 @@ CONFIG_ESP_SYSTEM_PANIC_PRINT_REBOOT=y
 # ADC Configuration
 CONFIG_ADC_ONESHOT_CTRL_FUNC_IN_IRAM=n
 
-# Disable unnecessary features to save space
-CONFIG_ESP_WIFI_SOFTAP_SUPPORT=n
+# SoftAP is required for ESP-WIFI-MESH and for the phone to join a node.
+CONFIG_ESP_WIFI_SOFTAP_SUPPORT=y
 
 # LVGL fonts (used across all display-equipped boards)
 CONFIG_LV_FONT_MONTSERRAT_14=y

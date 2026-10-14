@@ -4,6 +4,7 @@
 #include "moisture_sensor.h"
 #include "display.h"
 #include "pump.h"
+#include "mesh_net.h"
 
 static const char *TAG = "Main";
 
@@ -11,6 +12,7 @@ void app_main(void)
 {
     ESP_LOGI(TAG, "Dryad starting");
     pump_init();
+    mesh_net_start();
 
     BaseType_t ret;
 
