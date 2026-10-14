@@ -4,7 +4,7 @@ import os from 'node:os';
 import path from 'node:path';
 import * as THREE from 'three';
 import { STLExporter } from 'three/addons/exporters/STLExporter.js';
-import { build, volumeMm3, printPlate } from '../src/cad.js';
+import { build, volumeMm3, printPlate, fitReport } from '../src/cad.js';
 
 const out = fs.mkdtempSync(path.join(process.env.TMPDIR || os.tmpdir(), 'dryad-cad-'));
 let failed = false;
@@ -24,13 +24,30 @@ for (const vaseD of [70, 110, 200]) {
     const open = build({ vaseD, screen: 1 });
     const closed = build({ vaseD, screen: 0 });
     const { layout: L, params, warnings } = open;
-    const espL = L.esp[1] - L.esp[0], espWspan = L.esp[5] - L.esp[4];
-    if (espL < 70 || espWspan < 28) { console.log('  !! ESP pocket smaller than S3 DevKit 70x28'); failed = true; }
+    const espL = L.esp[1] - L.esp[0], espZ = L.esp[5] - L.esp[4];
+    if (espL < 34 || espL > 36 || espZ < 25 || espZ > 27) {
+      console.log(`  !! ESP bay ${espL.toFixed(1)}x${espZ.toFixed(1)} is not the S2 Mini (34.3x25.4)`); failed = true;
+    }
+    if (L.drv[1] - L.drv[0] > 30) { console.log('  !! driver bay is still the large heatsink module'); failed = true; }
     const h = parts.housing; h.computeBoundingBox();
     const hs = new THREE.Vector3(); h.boundingBox.getSize(hs);
-    console.log(`  enclosure ${hs.x.toFixed(1)}x${hs.y.toFixed(1)}x${hs.z.toFixed(1)} (limit 88x52x115)`);
-    if (!(hs.x < 88 && hs.y < 52 && hs.z < 115)) { console.log('  !! enclosure exceeds 88x52x115'); failed = true; }
+    console.log(`  enclosure ${hs.x.toFixed(1)}x${hs.y.toFixed(1)}x${hs.z.toFixed(1)} (limit 78x46x78)`);
+    if (!(hs.x < 78 && hs.y < 46 && hs.z < 78)) { console.log('  !! enclosure exceeds 78x46x78'); failed = true; }
+    if (!(hs.x > 70 && hs.y > 36 && hs.z > 68)) { console.log('  !! enclosure bbox is not the packed pod'); failed = true; }
     if (!(hs.z > params.H + 2)) { console.log('  !! crown missing'); failed = true; }
+    const fit = fitReport(params, L);
+    console.log(`  bay gap ${fit.minGap.toFixed(2)} mm (${fit.closest})  holder wall ${fit.holderWall} mm  sheath ${fit.sheathT.toFixed(2)} mm`);
+    if (fit.outside.length) { console.log('  !! BOM outside the bay: ' + fit.outside.join(', ')); failed = true; }
+    if (!(fit.minGap >= 0.55)) { console.log('  !! BOM clearance under 0.55 mm'); failed = true; }
+    if (Math.abs(L.chg[0] + params.W / 2 - params.wall) > 0.3) { console.log('  !! TP4056 USB-C is not on the left wall'); failed = true; }
+    const arm = parts.arm; arm.computeBoundingBox();
+    const asz = new THREE.Vector3(); arm.boundingBox.getSize(asz);
+    const armCm3 = volumeMm3(arm) / 1000;
+    console.log(`  holder bbox ${asz.x.toFixed(1)}x${asz.y.toFixed(1)}x${asz.z.toFixed(1)} mm  ${armCm3.toFixed(1)} cm3`);
+    if (!(asz.z < 7.5 && asz.z > 6)) { console.log('  !! holder spine is not the slim bar'); failed = true; }
+    if (!(fit.holderWall <= 1.35 && fit.holderWall >= 0.8)) { console.log('  !! holder wall regressed'); failed = true; }
+    if (!(fit.sheathT <= 5 && fit.sheathT >= 3.2)) { console.log('  !! probe sheath is chunky or missing'); failed = true; }
+    if (!(armCm3 < 14)) { console.log('  !! sensor arm is still a chunky block'); failed = true; }
     if (warnings.length) { console.log('  !! ' + warnings.join(' | ')); failed = true; }
     if (closed.warnings.length) { console.log('  !! closed ' + closed.warnings.join(' | ')); failed = true; }
     const labels = (m) => m.ghosts.map((g) => g.label);

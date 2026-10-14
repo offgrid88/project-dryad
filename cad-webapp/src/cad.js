@@ -7,32 +7,49 @@
 //
 // Only the COLLAR depends on the vase, only the CRADLE on the bottle.
 // Housing, front panel and arm are the same for every vase.
+//
+// Default combo (electronics bay), sources in the DEFAULTS comment:
+//   LOLIN ESP32-S2 Mini, TP4056 USB-C, mini L298, VTC6 18650, JSB diaphragm pump.
+// The soil probe is clipped by the sensor arm; it does not sit in the bay.
 import * as THREE from 'three';
 import { Brush, Evaluator, ADDITION, SUBTRACTION, INTERSECTION } from 'three-bvh-csg';
 
 export const DEFAULTS = {
   // vase collar (the only vase-dependent part)
   vaseD: 110, clearance: 0.5, ringT: 4, ringH: 30, padT: 6, rimGap: 4,
-  // Soft electronics pod. Rounded vertical corners and a low crown, still
-  // inside the old 88×52×115 mm box. Wall and top are thick enough that the
-  // corner radius does not break into the component bay.
-  W: 86, D: 43, H: 92, wall: 4, topT: 4.6, panelT: 2.6,
+  // Tight pod around the S2 Mini combo. Wall and top stay thick enough that
+  // a 10 mm corner radius still leaves ~1.2 mm of skin outside the bay.
+  W: 76, D: 42, H: 64, wall: 4, topT: 4.6, panelT: 2.6,
   cornerR: 10, crownH: 9,
   // 1 = screen window in the lid, 0 = closed lid (switch + charge port only)
   screen: 1,
-  // components (pocket sizes, edit to match your modules)
-  screenW: 50, screenH: 70, screenT: 6, windowW: 43, windowH: 57, windowDz: 3,
-  espW: 72, espH: 30, espT: 14,   // 70×28 DevKit + 1 mm, 14 mm with pin headers
-  chgW: 26, chgH: 18, chgT: 8,
-  dcW: 22, dcH: 18, dcT: 8,
-  batL: 68, batD: 20,
-  pumpL: 38, pumpW: 22, pumpH: 24,
-  drvL: 36, drvW: 16, drvH: 18,   // mini L298 module
+  screenW: 38, screenH: 28, screenT: 4, windowW: 30, windowH: 22, windowDz: -10,
+  // LOLIN S2 Mini V1.0.0: 34.3×25.4 mm from the Wemos dimension drawing
+  // (CoThings page has no mm). Thickness 5.0 mm is assumed: 1.6 mm PCB + USB-C.
+  // Headers in the product photo are loose, so the bay is the bare board.
+  espW: 34.3, espH: 25.4, espT: 5.0,
+  // TP4056/TC4056 USB-C module. Page has no mm; assumed 28×17×4.2 with the
+  // USB-C receptacle on a short edge (the edge that meets the left-wall port).
+  chgW: 28, chgH: 17, chgT: 4.2,
+  // Mini driver. Page MEASURED 24.7×21×5 mm. The photo shows two 100 µF/16 V
+  // cans, so the pocket is 12 mm tall (assumed can height) on that footprint.
+  drvL: 24.7, drvW: 21, drvH: 12,
+  // VTC6. Page says format 18650 only. Assumed IEC/Murata cell 18.35×65.1 mm.
+  batL: 65.1, batD: 18.35,
+  // JSB1523078 / 030 diaphragm pump (photo). Page lists 5 V, 80 mA, 60 kPa,
+  // −40 kPa, 0.6 L/min, 15 g, and no millimeters. Assumed body 40×22×20 mm;
+  // the twin nozzles point at the right wall.
+  pumpL: 40, pumpW: 22, pumpH: 20,
   swW: 13.5, swH: 19.8,
   // reservoir cradle (the only bottle-dependent part)
   bottleD: 44, cupH: 45, cupWall: 2.4, bottleMl: 100,
-  // sensor arm
-  armW: 26, armT: 10, inset: 38, slotW: 24.5, slotT: 3, tubeOD: 4,
+  // Sensor arm. The listing MEASURED the probe at 92.1×23.5×6.5 mm and calls
+  // it capacitive; the photo is a thin YL-69 fork plus a YL-38 board. The clip
+  // grips the 1.6 mm blade (6.5 mm is the head/comparator, above the sheath).
+  // Spine was a 26×10 mm bar; it is now a 8.6×6.8 mm rounded bar, clip wall 1.2.
+  armW: 8.6, armT: 6.8, holderWall: 1.2, inset: 38,
+  slotW: 24.0, slotT: 2.15, tubeOD: 4,
+  probeW: 23.5, probeL: 92.1, probeHead: 6.5,
 };
 
 const SEG = 48;
@@ -107,53 +124,95 @@ function roundRect(axis, a0, a1, u0, u1, v0, v1, r, seg = 32) {
   return U(parts[0], ...parts.slice(1));
 }
 
-// Component boxes [x0,x1,y0,y1,z0,z1] shared by the CAD and the preview ghosts.
-export function layout(p) {
-  const iw = p.W / 2 - p.wall;
-  const yb = p.wall + 1; // board sits just off the back wall
-  const floor = -p.H + p.wall;
-  // Screen is on the front panel and spans most of the height. The boards,
-  // pump and cell sit behind it, so the shell does not have to grow by the
-  // screen height again.
-  const zc = -p.topT - 2 - p.screenH / 2;
-  const esp = [-p.espW / 2, p.espW / 2, yb, yb + p.espT, -p.topT - 2 - p.espH, -p.topT - 2];
-  // Charger on the left wall so the USB-C cut meets it. Driver on the right.
-  const chg = [-iw, -iw + p.chgW, esp[3] + 1, esp[3] + 1 + p.chgT, esp[5] - 2 - p.chgH, esp[5] - 2];
-  const drv = [iw - p.drvL, iw, esp[3] + 1, esp[3] + 1 + p.drvW, esp[4], esp[4] + p.drvH];
-  const bat = [-p.batL / 2, p.batL / 2, yb, yb + p.batD, floor, floor + p.batD];
-  const pump = [-p.pumpL / 2, p.pumpL / 2, yb, yb + p.pumpW, bat[5] + 2, bat[5] + 2 + p.pumpH];
-  // In front of the pump so the module does not share a column with the cell.
-  const dc = [-iw, -iw + p.dcW, pump[3] + 1, pump[3] + 1 + p.dcT, chg[4] - 2 - p.dcH, chg[4] - 2];
-  const screen = [-p.screenW / 2, p.screenW / 2, p.D - p.screenT, p.D, zc - p.screenH / 2, zc + p.screenH / 2];
-  // Keep the rocker and the USB-C slot on the flat part of the rounded side wall.
-  const clampZ = (z, half) => {
-    const lo = -p.H + p.cornerR + half + 1.5;
-    const hi = -p.cornerR - half - 1.5;
-    return Math.min(hi, Math.max(lo, z));
-  };
-  const sw = { y: (bat[2] + bat[3]) / 2, z: clampZ((bat[4] + bat[5]) / 2, p.swH / 2) };
-  const usb = { y: (chg[2] + chg[3]) / 2, z: clampZ((chg[4] + chg[5]) / 2, 6) };
-  const inlet = { y: (pump[2] + pump[3]) / 2, z: -p.H + p.cupH - 5 };
-  const ys = -(p.padT + p.ringT + p.inset);
-  return { iw, yb, floor, zc, esp, chg, dc, drv, pump, bat, screen, sw, usb, inlet, ys };
+function bossZs(p) {
+  // Stay on the flat band, clear of the lid window.
+  return [-p.cornerR - 4.5, -p.H + p.cornerR + 7];
 }
 
-// Corner posts + pegs that locate a rectangular board. axis 'y': board mounted on the
-// back wall (x/z footprint). axis 'z': board resting on a floor (x/y footprint).
-function cradle(c, axis, wallY, p = 2) {
-  const [x0, x1, y0, y1, z0, z1] = c;
-  const out = [];
-  if (axis === 'y') {
-    for (const [px, pz] of [[x0 - p, z0 - p], [x1, z0 - p], [x0 - p, z1], [x1, z1]])
-      out.push(box(px, px + p, wallY - 0.5, y1, pz, pz + p));
-    for (const [qx, qz] of [[x0 + 4, z0 + 4], [x1 - 4, z0 + 4], [x0 + 4, z1 - 4], [x1 - 4, z1 - 4]])
-      out.push(cyl('y', 2, wallY - 0.5, y0, qx, qz, 16));
-  } else {
-    const h = (z1 - z0) * 0.6;
-    for (const [px, py] of [[x0 - p, y0 - p], [x1, y0 - p], [x0 - p, y1], [x1, y1]])
-      out.push(box(px, px + p, py, py + p, z0 - 0.5, z0 + h));
+// Component boxes [x0,x1,y0,y1,z0,z1] shared by the CAD and the preview ghosts.
+// Gaps are 0.8 mm between modules, ~1 mm around the cell, USB-C hard against
+// the left inner wall so the charge port meets the TP4056.
+export function layout(p) {
+  const iw = p.W / 2 - p.wall;
+  const yb = p.wall + 1.2; // clear of the back-wall screw pilots
+  const floor = -p.H + p.wall;
+  const g = 0.8;
+  const bat = [-p.batL / 2, p.batL / 2, yb, yb + p.batD, floor + 1.0, floor + 1.0 + p.batD];
+  // Pump above the cell, nozzles at +X. The body is the long side of the bay.
+  const pump = [iw - 1 - p.pumpL, iw - 1, yb, yb + p.pumpW, bat[5] + g, bat[5] + g + p.pumpH];
+  // Driver lies on the pump, clear of the nozzle end so the outlet tube can rise.
+  const drv = [pump[0] + 0.6, pump[0] + 0.6 + p.drvL, pump[2] + 0.5, pump[2] + 0.5 + p.drvW, pump[5] + 0.6, pump[5] + 0.6 + p.drvH];
+  const yFront = Math.max(pump[3], bat[3]) + g;
+  const usbHalf = 7.4;
+  const usbLo = -p.H + p.cornerR + usbHalf + 1;
+  const usbHi = -p.cornerR - usbHalf - 1;
+  const usbZ = Math.min(usbHi, Math.max(usbLo, -p.topT - 24));
+  // Charger length runs in from the left wall (USB-C on that short edge).
+  const chg = [-iw, -iw + p.chgW, yFront, yFront + p.chgT, usbZ - p.chgH / 2, usbZ + p.chgH / 2];
+  const esp = [chg[1] + 1.0, chg[1] + 1.0 + p.espW, yFront, yFront + p.espT, -p.topT - 1 - p.espH, -p.topT - 1];
+  const zc = -p.topT - 2 - p.screenH / 2;
+  const screen = [-p.screenW / 2, p.screenW / 2, p.D - p.screenT, p.D, zc - p.screenH / 2, zc + p.screenH / 2];
+  const swHalf = p.swH / 2;
+  const swLo = -p.H + p.cornerR + swHalf + 1.2;
+  const swHi = -p.cornerR - swHalf - 1.2;
+  const sw = {
+    y: yb + 7,
+    z: Math.min(swHi, Math.max(swLo, bat[5] + swHalf + 0.9)),
+  };
+  const usb = { y: (chg[2] + chg[3]) / 2, z: (chg[4] + chg[5]) / 2 };
+  const nozzleY = (pump[2] + pump[3]) / 2;
+  const nozzleZ = (pump[4] + pump[5]) / 2;
+  // Twin nozzles on the +X face, 9 mm apart. Inlet leaves through the right wall;
+  // outlet turns up through the crown into the sensor arm.
+  const inlet = { y: nozzleY, z: nozzleZ - 4.5 };
+  const outlet = { x: pump[1] - 8, y: nozzleY, z: nozzleZ + 4.5 };
+  const ys = -(p.padT + p.ringT + p.inset);
+  return { iw, yb, floor, zc, esp, chg, drv, pump, bat, screen, sw, usb, inlet, outlet, ys };
+}
+
+// How far two AABB boxes are apart. Negative means they overlap by that much.
+function separation(a, b) {
+  const gaps = [0, 1, 2].map((i) => {
+    const a0 = a[i * 2], a1 = a[i * 2 + 1], b0 = b[i * 2], b1 = b[i * 2 + 1];
+    if (a1 <= b0) return b0 - a1;
+    if (b1 <= a0) return a0 - b1;
+    return 0;
+  });
+  if (gaps.every((g) => g === 0)) {
+    const overlaps = [0, 1, 2].map((i) => Math.min(a[i * 2 + 1], b[i * 2 + 1]) - Math.max(a[i * 2], b[i * 2]));
+    return -Math.min(...overlaps);
   }
-  return out;
+  return Math.hypot(...gaps);
+}
+
+const BOM = [
+  ['esp', 'S2 Mini'],
+  ['chg', 'TP4056'],
+  ['drv', 'L298'],
+  ['pump', 'pump'],
+  ['bat', '18650'],
+];
+
+// Bay containment and pair gaps for the default combo. Used by validate() and the smoke test.
+export function fitReport(p, L) {
+  const iw = L.iw, floor = L.floor, ceil = -p.topT;
+  const outside = [];
+  for (const [key, label] of BOM) {
+    const b = L[key];
+    if (b[0] < -iw - 0.05 || b[1] > iw + 0.05 || b[2] < p.wall - 0.05 || b[3] > p.D - 5.5 || b[4] < floor - 0.05 || b[5] > ceil + 0.05)
+      outside.push(label);
+  }
+  let minGap = Infinity, closest = '';
+  for (let i = 0; i < BOM.length; i++) for (let j = i + 1; j < BOM.length; j++) {
+    const gap = separation(L[BOM[i][0]], L[BOM[j][0]]);
+    if (gap < minGap) { minGap = gap; closest = `${BOM[i][1]}–${BOM[j][1]}`; }
+  }
+  return {
+    outside, minGap, closest,
+    holderWall: p.holderWall,
+    armT: p.armT,
+    sheathT: p.slotT + 2 * p.holderWall,
+  };
 }
 
 function buildHousing(p, L) {
@@ -169,28 +228,34 @@ function buildHousing(p, L) {
   h = S(h, bay, cap);
 
   const bossX = iw - 1.6, bossR = 2.5;
-  const bossZ = [-r - 7, -H + r + 9];
+  const bossZ = bossZs(p);
+  const bossY0 = D - 6.2;
   const add = [];
   for (const sx of [-1, 1]) for (const z of bossZ)
-    add.push(cyl('y', bossR, D - 8, D - 0.3, sx * bossX, z, 20));
-  add.push(...cradle(L.esp, 'y', wall), ...cradle(L.chg, 'y', wall), ...cradle(L.dc, 'y', wall));
-  add.push(...cradle(L.drv, 'y', wall));
-  add.push(...cradle(L.pump, 'z', wall), ...cradle(L.bat, 'z', wall, 1.6));
+    add.push(cyl('y', bossR, bossY0, D - 0.3, sx * bossX, z, 20));
+  // End stops for the cell. It slides in from the front; the stops keep the
+  // spring gap without a loose cavity.
+  const [bx0, bx1, by0, by1, bz0] = L.bat;
+  const t = 1.0;
+  add.push(
+    box(bx0 - t - 0.35, bx0 - 0.35, by0, by1, bz0, bz0 + 6),
+    box(bx1 + 0.35, bx1 + t + 0.35, by0, by1, bz0, bz0 + 6),
+  );
   h = U(h, ...add);
 
   const cut = [];
   for (const sx of [-1, 1]) for (const z of bossZ)
-    cut.push(cyl('y', 1.25, D - 7, D + 1, sx * bossX, z, 16));
+    cut.push(cyl('y', 1.25, bossY0 + 0.8, D + 1, sx * bossX, z, 16));
   for (const sx of [-1, 1]) for (const z of [-11, -27])
-    cut.push(cyl('y', 1.7, -1, wall + 1, sx * (W / 2 - 12), z, 16)); // collar screws, matched to the collar pad
-  cut.push(cyl('z', 3.2, -topT - 1, p.crownH + 1, 0, 12, 24)); // pump outlet -> arm
+    cut.push(cyl('y', 1.7, -1, wall + 0.6, sx * (W / 2 - 12), z, 16)); // collar screws, stop short of the cell
+  cut.push(cyl('z', 2.6, -topT - 1, p.crownH + 1, L.outlet.x, L.outlet.y, 20)); // pump outlet -> arm
   for (const sx of [-1, 1]) cut.push(cyl('z', 1.7, -topT - 1, p.crownH + 1, sx * 9, 17, 16));
-  // USB-C slot, with a shallow oval recess so the port reads as a finished detail.
+  // USB-C slot, with a shallow oval recess so the charge port reads as a finished detail.
   cut.push(roundRect('x', -W / 2 - 1, -W / 2 + 0.7, L.usb.y - 4.2, L.usb.y + 4.2, L.usb.z - 7.2, L.usb.z + 7.2, 3.2, 18));
   cut.push(roundRect('x', -W / 2 - 1, -iw + 1, L.usb.y - 2.2, L.usb.y + 2.2, L.usb.z - 5.2, L.usb.z + 5.2, 2.1, 16));
   cut.push(roundRect('x', -W / 2 - 1, -W / 2 + 0.7, L.sw.y - p.swW / 2 - 1.4, L.sw.y + p.swW / 2 + 1.4, L.sw.z - p.swH / 2 - 1.4, L.sw.z + p.swH / 2 + 1.4, 3.4, 18));
   cut.push(roundRect('x', -W / 2 - 1, -iw + 1, L.sw.y - p.swW / 2, L.sw.y + p.swW / 2, L.sw.z - p.swH / 2, L.sw.z + p.swH / 2, 3.2, 18));
-  cut.push(cyl('x', 3.2, iw - 1, W / 2 + 1, L.inlet.y, L.inlet.z, 24));
+  cut.push(cyl('x', 2.6, iw - 1, W / 2 + 1, L.inlet.y, L.inlet.z, 24)); // pump inlet -> bottle
   for (const y of [6, 30]) cut.push(cyl('x', 1.7, iw - 1, W / 2 + 1, y, -H + 20, 16));
   return S(h, ...cut);
 }
@@ -204,18 +269,18 @@ function buildPanel(p, L) {
   pl = I(pl, crownBrush(p, lip));
   const cut = [];
   const bossX = L.iw - 1.6;
-  for (const sx of [-1, 1]) for (const z of [-p.cornerR - 7, -H + p.cornerR + 9])
+  for (const sx of [-1, 1]) for (const z of bossZs(p))
     cut.push(cyl('y', 1.6, D - 1, D + panelT + 1, sx * bossX, z, 16));
   if (p.screenOn) {
     const [sx0, sx1, , , sz0, sz1] = L.screen;
-    const q = 3, add = [];
+    const q = 2.4, add = [];
     for (const [px, pz] of [[sx0 - q, sz0 - q], [sx1, sz0 - q], [sx0 - q, sz1], [sx1, sz1]])
       add.push(box(px, px + q, D - p.screenT, D + 0.4, pz, pz + q));
     pl = U(pl, ...add);
     const wz0 = L.zc + p.windowDz - p.windowH / 2, wz1 = L.zc + p.windowDz + p.windowH / 2;
     // Seated bezel, then the window itself. Both have soft corners.
-    pl = S(pl, roundRect('y', D + panelT - 0.65, D + panelT + 2, -p.windowW / 2 - 3.5, p.windowW / 2 + 3.5, wz0 - 3.5, wz1 + 3.5, 8, 24));
-    cut.push(roundRect('y', D - 2, D + panelT + 2, -p.windowW / 2, p.windowW / 2, wz0, wz1, 7, 28));
+    pl = S(pl, roundRect('y', D + panelT - 0.65, D + panelT + 2, -p.windowW / 2 - 3.2, p.windowW / 2 + 3.2, wz0 - 3.2, wz1 + 3.2, 6, 24));
+    cut.push(roundRect('y', D - 2, D + panelT + 2, -p.windowW / 2, p.windowW / 2, wz0, wz1, 5.5, 28));
   }
   // screen off: the lid stays closed. The on/off switch and the USB-C port are on the side wall.
   return cut.length ? S(pl, ...cut) : pl;
@@ -241,15 +306,30 @@ function buildCollar(p) {
 }
 
 function buildArm(p, L) {
-  const tipY = L.ys - p.slotT / 2 - 14, yo = L.ys + 10, zc = p.armT / 2, r = (p.tubeOD + 0.6) / 2;
-  let a = box(-p.armW / 2, p.armW / 2, tipY, 28, 0, p.armT);
+  const tipY = L.ys - p.slotT / 2 - 8;
+  const yo = L.ys + 12;
+  const zc = p.armT / 2;
+  const bore = (p.tubeOD + 0.45) / 2;
+  const wall = p.holderWall;
+  const spineR = Math.min(2.2, p.armW / 2 - 0.35, p.armT / 2 - 0.35);
+  // Slim rounded spine. A small pad takes the two lid screws, a rib carries the
+  // outlet tube out to the pump chimney, and a thin sheath clips the probe.
+  let a = roundRect('y', tipY, 26, -p.armW / 2, p.armW / 2, 0, p.armT, spineR, 20);
+  const pad = roundRect('y', 7, 24, -13, 13, 0, p.armT, 2.6, 18);
+  const rib = roundRect('x', -1.5, L.outlet.x + 2.5, L.outlet.y - p.armT / 2, L.outlet.y + p.armT / 2, 0, p.armT, spineR, 16);
+  const clip = roundRect('z', 0, p.armT,
+    -p.slotW / 2 - wall, p.slotW / 2 + wall,
+    L.ys - p.slotT / 2 - wall, L.ys + p.slotT / 2 + wall,
+    Math.min(1.15, wall), 16);
+  a = U(a, pad, rib, clip);
   const cut = [
-    box(-p.slotW / 2, p.slotW / 2, L.ys - p.slotT / 2, L.ys + p.slotT / 2, -1, p.armT + 1), // sensor slot
-    cyl('z', r, -1, zc, 0, 12, 24),                  // tube in (from housing)
-    cyl('y', r, yo, 12, 0, zc, 24),                  // tube run
-    cyl('z', r, -1, zc, 0, yo, 24),                  // outlet onto the soil
+    roundRect('z', -1, p.armT + 1, -p.slotW / 2, p.slotW / 2, L.ys - p.slotT / 2, L.ys + p.slotT / 2, 0.55, 14),
+    cyl('z', bore, -1, p.armT + 1, L.outlet.x, L.outlet.y, 16),
+    cyl('x', bore, 0, L.outlet.x, L.outlet.y, zc, 16),
+    cyl('y', bore, yo, L.outlet.y, 0, zc, 16),
+    cyl('z', bore, -1, zc, 0, yo, 16),
   ];
-  for (const sx of [-1, 1]) cut.push(cyl('z', 1.3, -1, p.armT - 2, sx * 9, 17, 16));
+  for (const sx of [-1, 1]) cut.push(cyl('z', 1.3, -1, p.armT - 1.4, sx * 9, 17, 16));
   return S(a, ...cut);
 }
 
@@ -262,7 +342,7 @@ function buildCradle(p, L) {
   const cut = [
     cyl('z', bd / 2, zb + 3, zt + 1, cx, cy, 96),                              // bottle bore
     box(W / 2 + 1.5, cx, cy - 4, cy + 4, zt - 10, zt + 1),                     // tube notch
-    cyl('x', 3.2, W / 2 - 1, W / 2 + 4, cy, L.inlet.z, 24),                    // tube hole through plate
+    cyl('x', 2.6, W / 2 - 1, W / 2 + 4, cy, L.inlet.z, 24),                    // tube hole through plate
     box(cx - 0.3 * bd, cx + 0.3 * bd, cy, cy + bd, zb + 8, zt + 1),            // front slit (odd bottle shapes)
   ];
   for (const y of [6, 30]) cut.push(cyl('x', 1.3, W / 2 - 1, W / 2 + 3, y, -H + 20, 16));
@@ -282,7 +362,7 @@ export function build(params = {}) {
   };
   const parts = {};
   for (const [k, b] of Object.entries(geo)) parts[k] = b.geometry;
-  return { params: p, layout: L, parts, ghosts: ghosts(p, L), warnings: validate(p) };
+  return { params: p, layout: L, parts, ghosts: ghosts(p, L), warnings: validate(p, L) };
 }
 
 // Non-printed stand-ins for the real hardware, so placement can be checked visually.
@@ -292,22 +372,23 @@ export function ghosts(p, L) {
   const bx = p.W / 2 + 4 + bR + p.cupWall - 0.8;
   const B = (part, label, color, b) => ({ part, label, color, shape: 'box', b });
   const C = (part, label, color, axis, r, a0, a1, c1, c2) => ({ part, label, color, shape: 'cyl', axis, r, a0, a1, c1, c2 });
+  const head = p.probeHead;
   return [
-    B('housing', 'ESP32-S3 / C6 / C3', '#2e7d32', L.esp),
-    B('housing', 'USB-C charger', '#1565c0', L.chg),
-    B('housing', 'DC-DC 3.7→5V', '#ef6c00', L.dc),
+    B('housing', 'ESP32-S2 Mini', '#2e7d32', L.esp),
+    B('housing', 'TP4056 USB-C', '#1565c0', L.chg),
     B('housing', 'L298 driver', '#6d4c41', L.drv),
     B('housing', 'Pump', '#6a1b9a', L.pump),
-    C('housing', 'Battery', '#c62828', 'x', p.batD / 2, L.bat[0], L.bat[1], (L.bat[2] + L.bat[3]) / 2, L.bat[4] + (p.batD + 2) / 2),
-    B('housing', 'Switch', '#212121', [-L.iw - 3, -L.iw + 15, L.sw.y - p.swW / 2, L.sw.y + p.swW / 2, L.sw.z - p.swH / 2, L.sw.z + p.swH / 2]),
+    C('housing', 'VTC6 18650', '#c62828', 'x', p.batD / 2, L.bat[0], L.bat[1], (L.bat[2] + L.bat[3]) / 2, (L.bat[4] + L.bat[5]) / 2),
+    B('housing', 'Switch', '#212121', [-L.iw - 2, -L.iw + 12, L.sw.y - p.swW / 2, L.sw.y + p.swW / 2, L.sw.z - p.swH / 2, L.sw.z + p.swH / 2]),
     ...(p.screenOn ? [B('panel', 'Screen', '#00838f', L.screen)] : []),
-    B('arm', 'Moisture sensor', '#f9a825', [-11.5, 11.5, L.ys - 0.8, L.ys + 0.8, p.armT + 4 - 98, p.armT + 4]),
+    B('arm', 'Soil probe', '#f9a825', [-p.probeW / 2, p.probeW / 2, L.ys - 0.8, L.ys + 0.8, p.armT + 2 - p.probeL, p.armT + 2]),
+    B('arm', 'Soil probe', '#ef6c00', [-p.probeW / 2, p.probeW / 2, L.ys - head / 2, L.ys + head / 2, p.armT + 2, p.armT + 10]),
     C('collar', 'Vase', '#8d6e63', 'z', p.vaseD / 2, -p.rimGap - 130, -p.rimGap, 0, yc),
     C('cradle', 'Bottle', '#4fc3f7', 'z', bR, -p.H + 3, -p.H + 3 + bH, bx, L.inlet.y),
   ];
 }
 
-export function validate(p) {
+export function validate(p, L = layout(p)) {
   const w = [];
   if (p.cornerAsked != null && p.cornerR + 0.2 < p.cornerAsked)
     w.push(`Corner radius reduced to ${p.cornerR} mm so the bay wall stays intact.`);
@@ -317,16 +398,13 @@ export function validate(p) {
   if (p.vaseD < 2 * p.inset) w.push('Sensor reach is larger than the vase diameter; reduce "sensor inset".');
   if (p.vaseD > 220) w.push('Vase Ø > 220 mm: collar will be large and needs more than one housing screw row.');
   if (p.bottleD < 25 || p.bottleD > 70) w.push('Bottle Ø outside 25–70 mm: check the cradle fits the 100 ml bottle.');
-  if (p.espW < 70 || p.espH < 28) w.push('ESP pocket is smaller than an ESP32-S3-DevKitC-1 (70×28 mm).');
-  if (p.W < p.espW + 2 * p.wall + 2) w.push('Housing is narrower than the ESP pocket.');
-  const L = layout(p);
-  const boxes = [L.esp, L.chg, L.dc, L.drv, L.pump, L.bat];
-  for (const b of boxes) {
-    if (b[0] < -p.W / 2 || b[1] > p.W / 2 || b[2] < 0 || b[3] > p.D || b[4] < -p.H || b[5] > 0) {
-      w.push('A component pocket sticks out of the electronics enclosure.');
-      break;
-    }
-  }
+  if (p.espW < 34 || p.espH < 25) w.push('ESP bay is smaller than a LOLIN S2 Mini (34.3×25.4 mm).');
+  if (p.W < p.batL + 2 * p.wall + 2) w.push('Housing is narrower than the 18650 plus contact clearance.');
+  if (p.armT < p.tubeOD + 2 * p.holderWall) w.push('Sensor arm is thinner than the tube plus its walls.');
+  if (p.slotW < p.probeW) w.push('Probe clip is narrower than the soil probe.');
+  const fit = fitReport(p, L);
+  if (fit.outside.length) w.push(`Outside the bay: ${fit.outside.join(', ')}.`);
+  if (fit.minGap < 0.55) w.push(`Parts closer than 0.55 mm (${fit.closest}, ${fit.minGap.toFixed(2)} mm).`);
   return w;
 }
 

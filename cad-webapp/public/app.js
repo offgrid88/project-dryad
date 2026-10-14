@@ -17,10 +17,10 @@ const GROUPS = {
   'Vase collar': ['clearance', 'ringT', 'ringH', 'padT', 'rimGap'],
   'Housing': ['W', 'D', 'H', 'wall', 'topT', 'panelT', 'cornerR', 'crownH'],
   'Screen': ['screenW', 'screenH', 'screenT', 'windowW', 'windowH', 'windowDz'],
-  'Boards': ['espW', 'espH', 'espT', 'chgW', 'chgH', 'chgT', 'dcW', 'dcH', 'dcT', 'drvL', 'drvW', 'drvH'],
+  'Boards': ['espW', 'espH', 'espT', 'chgW', 'chgH', 'chgT', 'drvL', 'drvW', 'drvH'],
   'Battery / pump / switch': ['batL', 'batD', 'pumpL', 'pumpW', 'pumpH', 'swW', 'swH'],
   'Bottle cradle': ['cupH', 'cupWall', 'bottleMl'],
-  'Sensor arm': ['armW', 'armT', 'inset', 'slotW', 'slotT', 'tubeOD'],
+  'Sensor arm': ['armW', 'armT', 'holderWall', 'inset', 'slotW', 'slotT', 'tubeOD'],
 };
 
 const $ = (id) => document.getElementById(id);
@@ -39,7 +39,7 @@ const grid = new THREE.GridHelper(600, 30, 0x889988, 0xaabbaa); grid.rotation.x 
 grid.material.transparent = true; grid.material.opacity = 0.35; scene.add(grid);
 
 let params = { ...DEFAULTS };
-try { params = { ...params, ...JSON.parse(localStorage.getItem('dryad-cad-2') || '{}') }; } catch {}
+try { params = { ...params, ...JSON.parse(localStorage.getItem('dryad-cad-3') || '{}') }; } catch {}
 let model = null;                 // result of build()
 const groups = {};                // part name -> THREE.Group (solid + ghosts)
 const ghostMeshes = [];
@@ -138,7 +138,7 @@ function bind(input, key) {
     const v = parseFloat(input.value);
     if (!Number.isFinite(v) || v <= 0) return;
     params[key] = v;
-    try { localStorage.setItem('dryad-cad-2', JSON.stringify(params)); } catch {}
+    try { localStorage.setItem('dryad-cad-3', JSON.stringify(params)); } catch {}
     clearTimeout(timer); timer = setTimeout(rebuild, 400);
   };
 }
@@ -147,7 +147,7 @@ const screenBox = $('screenOn');
 screenBox.checked = params.screen !== 0 && params.screen !== false;
 screenBox.onchange = () => {
   params.screen = screenBox.checked ? 1 : 0;
-  try { localStorage.setItem('dryad-cad-2', JSON.stringify(params)); } catch {}
+  try { localStorage.setItem('dryad-cad-3', JSON.stringify(params)); } catch {}
   clearTimeout(timer); timer = setTimeout(rebuild, 40);
 };
 for (const [title, keys] of Object.entries(GROUPS)) {
