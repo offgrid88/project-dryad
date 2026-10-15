@@ -137,6 +137,22 @@ On the phone, join Wi-Fi `DRYAD1` / `dryad-mesh`, then open the app. The node ad
 
 GitHub Actions builds every PlatformIO environment on pushes and pull requests to `main` and `dev`. Artifacts from those runs stay on the Actions tab.
 
+## Releases
+
+Pushing a tag that starts with `v` (for example `v1.0.0`) runs `.github/workflows/release.yml`. That workflow builds the Android APK and firmware for `esp32s3`, `esp32s2`, `esp32c3`, and `esp32c6`, then attaches them to a GitHub Release for that tag. You can also run the workflow by hand. If the version input is empty, the release tag is `dev-<short sha>`.
+
+The release contains:
+
+| File | Contents |
+|------|----------|
+| `dryad-android.apk` | Expo app from `dryad-app`. Signed with the debug keystore when no release keystore is configured, so it can be installed directly. Cleartext HTTP stays enabled. |
+| `dryad-esp32s3.bin` | ESP32-S3 application, flash offset `0x10000` |
+| `dryad-esp32s2.bin` | ESP32-S2 application for the LOLIN S2 Mini, flash offset `0x10000` |
+| `dryad-esp32c3.bin` | ESP32-C3 application, flash offset `0x10000` |
+| `dryad-esp32c6.bin` | ESP32-C6 application, flash offset `0x10000` |
+
+Each chip also has `dryad-<chip>-bootloader.bin`, `dryad-<chip>-partitions.bin`, `dryad-<chip>-otadata.bin`, and `dryad-<chip>-flash.txt`. The flash note has the esptool command and the bootloader offset for that chip. `dryad-<chip>.elf` is attached only when it is 8 MiB or smaller. MQTT is still off in these images.
+
 ## 📤 Flashing Firmware
 
 ```bash

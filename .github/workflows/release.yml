@@ -1,0 +1,218 @@
+name: Release APK and firmware
+
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Release tag (optional). Empty uses dev-<short sha>."
+        required: false
+        type: string
+
+permissions:
+  contents: write
+
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+
+jobs:
+  firmware:
+    name: Firmware [${{ matrix.env }}]
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        env: [esp32s3, esp32s2, esp32c3, esp32c6]
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Cache PlatformIO
+        uses: actions/cache@v4
+        with:
+          path: ~/.platformio
+          key: ${{ runner.os }}-pio-${{ hashFiles('platformio.ini') }}
+          restore-keys: ${{ runner.os }}-pio-
+
+      - name: Install PlatformIO
+        run: pip install platformio
+
+      - name: Build ${{ matrix.env }}
+        run: pio run -e ${{ matrix.env }}
+
+      - name: Collect release files
+        run: python3 scripts/collect_release_firmware.py ${{ matrix.env }} release/${{ matrix.env }}
+
+      - name: Upload firmware
+        uses: actions/upload-artifact@v4
+        with:
+          name: dryad-${{ matrix.env }}
+          path: release/${{ matrix.env }}/
+          if-no-files-found: error
+          retention-days: 30
+
+  apk:
+    name: Android APK
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Java
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: dryad-app/package-lock.json
+
+      - name: Setup Android SDK
+        uses: android-actions/setup-android@v4
+
+      - name: Install Android SDK packages
+        run: |
+          yes | sdkmanager --licenses >/dev/null || true
+          sdkmanager --install "platforms;android-36" "build-tools;36.0.0" "build-tools;35.0.0" "ndk;27.1.12297006"
+
+      - name: Install npm dependencies
+        working-directory: dryad-app
+        run: npm ci
+
+      - name: Prebuild Android project
+        working-directory: dryad-app
+        env:
+          CI: "1"
+        run: npx expo prebuild --platform android
+
+      - name: Require cleartext HTTP
+        working-directory: dryad-app
+        run: |
+          manifest=android/app/src/main/AndroidManifest.xml
+          grep -q 'android:usesCleartextTraffic="true"' "$manifest"
+          echo "usesCleartextTraffic is true"
+
+      - name: Sign release with the debug keystore unless secrets exist
+        working-directory: dryad-app
+        env:
+          KEYSTORE_B64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+          KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+          KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+        run: |
+          gradle=android/app/build.gradle
+          if [ -z "$KEYSTORE_B64" ] || [ -z "$KEYSTORE_PASSWORD" ] || [ -z "$KEY_ALIAS" ] || [ -z "$KEY_PASSWORD" ]; then
+            echo "Release keystore secrets are absent. assembleRelease keeps signingConfigs.debug."
+            grep -q "signingConfig signingConfigs.debug" "$gradle"
+            exit 0
+          fi
+          echo "Release keystore secrets are set. assembleRelease will use them."
+          printf '%s' "$KEYSTORE_B64" | base64 -d > android/app/dryad-release.keystore
+          cat >> "$gradle" <<'EOF'
+
+          if (project.hasProperty("DRYAD_RELEASE_STORE_FILE")) {
+              def dryadRelease = android.signingConfigs.findByName("release") ?: android.signingConfigs.create("release")
+              dryadRelease.storeFile = project.file(project.property("DRYAD_RELEASE_STORE_FILE"))
+              dryadRelease.storePassword = project.property("DRYAD_RELEASE_STORE_PASSWORD")
+              dryadRelease.keyAlias = project.property("DRYAD_RELEASE_KEY_ALIAS")
+              dryadRelease.keyPassword = project.property("DRYAD_RELEASE_KEY_PASSWORD")
+              android.buildTypes.release.signingConfig = dryadRelease
+          }
+          EOF
+
+      - name: Assemble release APK
+        working-directory: dryad-app/android
+        env:
+          KEYSTORE_B64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+          KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+          KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+        run: |
+          args=()
+          if [ -n "$KEYSTORE_B64" ] && [ -n "$KEYSTORE_PASSWORD" ] && [ -n "$KEY_ALIAS" ] && [ -n "$KEY_PASSWORD" ]; then
+            args+=(
+              -PDRYAD_RELEASE_STORE_FILE=dryad-release.keystore
+              -PDRYAD_RELEASE_STORE_PASSWORD="$KEYSTORE_PASSWORD"
+              -PDRYAD_RELEASE_KEY_ALIAS="$KEY_ALIAS"
+              -PDRYAD_RELEASE_KEY_PASSWORD="$KEY_PASSWORD"
+            )
+          fi
+          chmod +x ./gradlew
+          ./gradlew assembleRelease --no-daemon "${args[@]}"
+          cp app/build/outputs/apk/release/app-release.apk "$GITHUB_WORKSPACE/dryad-android.apk"
+
+      - name: Verify APK signature
+        run: |
+          apksigner verify --print-certs dryad-android.apk
+          test -s dryad-android.apk
+
+      - name: Upload APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: dryad-android.apk
+          path: dryad-android.apk
+          if-no-files-found: error
+          retention-days: 30
+
+  release:
+    name: GitHub Release
+    needs: [firmware, apk]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Download artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: release-assets
+
+      - name: Resolve tag
+        id: tag
+        env:
+          INPUT_VERSION: ${{ inputs.version }}
+          EVENT_NAME: ${{ github.event_name }}
+        run: |
+          if [ "$EVENT_NAME" = "workflow_dispatch" ]; then
+            version="$(printf '%s' "$INPUT_VERSION" | tr -d '[:space:]')"
+            if [ -z "$version" ]; then
+              tag="dev-${GITHUB_SHA::7}"
+            else
+              tag="$version"
+            fi
+          else
+            tag="$GITHUB_REF_NAME"
+          fi
+          if ! printf '%s' "$tag" | grep -Eq '^[A-Za-z0-9._-]{1,64}$'; then
+            echo "Refusing tag: $tag"
+            exit 1
+          fi
+          if printf '%s' "$tag" | grep -Eq '^dev-'; then
+            prerelease=true
+            latest=false
+          else
+            prerelease=false
+            latest=true
+          fi
+          echo "tag=$tag" >> "$GITHUB_OUTPUT"
+          echo "prerelease=$prerelease" >> "$GITHUB_OUTPUT"
+          echo "latest=$latest" >> "$GITHUB_OUTPUT"
+          echo "Publishing $tag (prerelease=$prerelease)"
+          find release-assets -type f | sort
+
+      - name: Publish release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ steps.tag.outputs.tag }}
+          name: Dryad ${{ steps.tag.outputs.tag }}
+          target_commitish: ${{ github.sha }}
+          prerelease: ${{ steps.tag.outputs.prerelease }}
+          make_latest: ${{ steps.tag.outputs.latest }}
+          generate_release_notes: true
+          fail_on_unmatched_files: true
+          body: |
+            Android APK and firmware for esp32s3, esp32s2, esp32c3, and esp32c6.
+            MQTT is compiled in and left off. Flash offsets are in `dryad-<chip>-flash.txt`.
+            The APK is signed with the debug keystore unless release keystore secrets are configured.
+          files: release-assets/**/*
