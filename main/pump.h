@@ -13,9 +13,11 @@
  *   GPIO10 -> L298 IN1   (high = run forward). Leave unconnected for a MOSFET.
  *   L298 IN2 tied to GND. Motor supply is the pump supply, not 3.3 V.
  *
- * These two GPIOs are free on ESP32-S3, ESP32-C3, and ESP32-C6 dev boards
- * and are not the moisture ADC pin or the S3 display bus. They are also
- * not strapping pins, so the driver cannot hold the chip in download mode.
+ * These two GPIOs are free on ESP32-S3, ESP32-S2, ESP32-C3, and ESP32-C6
+ * dev boards and are not the moisture ADC pin or the S3 display bus. On the
+ * LOLIN S2 Mini the moisture sensor is GPIO1, so GPIO6 and GPIO10 stay
+ * available. They are also not strapping pins, so the driver cannot hold
+ * the chip in download mode.
  *
  * L298 is what the board is wired for today. It drops about 1.5–2 V and
  * warms up even at pump currents. Prefer one of these instead when you

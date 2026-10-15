@@ -5,6 +5,9 @@ sdkconfig.old
 sdkconfig.*
 !sdkconfig.defaults
 !sdkconfig.defaults.*
+
+# PlatformIO
+.pio/
 *.pyc
 
 # Editor directories and files
