@@ -25,6 +25,11 @@ static const char *TAG = "moisture_sensor";
 #define ADC_CHANNEL ADC_CHANNEL_0   // GPIO0
 #elif CONFIG_IDF_TARGET_ESP32S3
 #define ADC_CHANNEL ADC_CHANNEL_3   // GPIO4 (GPIO3 = LCD reset, cannot use)
+#elif CONFIG_IDF_TARGET_ESP32S2
+/* LOLIN S2 Mini. ADC1 is GPIO1–GPIO10 (ADC_CHANNEL_0 is GPIO1).
+ * Pump uses GPIO6 (PWM) and GPIO10 (IN1). USB D-/D+ are GPIO19/20.
+ * Strapping pins are GPIO0, GPIO45, and GPIO46. UART0 is GPIO43/44. */
+#define ADC_CHANNEL ADC_CHANNEL_0   // GPIO1
 #elif CONFIG_IDF_TARGET_ESP32
 #define ADC_CHANNEL ADC_CHANNEL_6   // GPIO34 (input-only, ADC1_CH6)
 #else
@@ -59,7 +64,8 @@ void setup_adc(void) {
         do_calibration = true;
         ESP_LOGI(TAG, "ADC calibration enabled (curve fitting)");
     }
-#elif CONFIG_IDF_TARGET_ESP32
+#elif CONFIG_IDF_TARGET_ESP32 || CONFIG_IDF_TARGET_ESP32S2
+    /* ESP32-S2 uses line fitting, same as the classic ESP32. */
     adc_cali_line_fitting_config_t cali_config = {
         .unit_id = ADC_UNIT,
         .atten = ADC_ATTEN,

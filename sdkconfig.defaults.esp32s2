@@ -1,0 +1,5 @@
+# LOLIN ESP32-S2 Mini flash configuration.
+# partitions.csv fills a 4 MB map (factory 0x1E0000 + ota_0 + otadata + spiffs).
+CONFIG_ESPTOOLPY_FLASHMODE_DIO=y
+CONFIG_ESPTOOLPY_FLASHFREQ_80M=y
+CONFIG_ESPTOOLPY_FLASHSIZE_4MB=y

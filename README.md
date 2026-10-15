@@ -13,7 +13,7 @@
 
 ## 🌱 Overview
 
-Project Dryad is a plant monitor for ESP32-C6, ESP32-C3, and ESP32-S3. Nodes share moisture and pump state over a Wi-Fi mesh with no router, and the Dryad phone app joins a node to watch, water, and configure it. MQTT is compiled in and left off until a broker exists.
+Project Dryad is a plant monitor for ESP32-C6, ESP32-C3, ESP32-S3, and ESP32-S2. Nodes share moisture and pump state over a Wi-Fi mesh with no router, and the Dryad phone app joins a node to watch, water, and configure it. MQTT is compiled in and left off until a broker exists.
 
 ## ✨ Features
 
@@ -30,8 +30,8 @@ Project Dryad is a plant monitor for ESP32-C6, ESP32-C3, and ESP32-S3. Nodes sha
 
 | Component | Description | GPIO |
 |-----------|-------------|------|
-| ESP32-C6/C3 | Main controller with WiFi 6 support | - |
-| Moisture Sensor | Capacitive soil moisture sensor | S3: GPIO4 · C3/C6: GPIO0 |
+| ESP32-C6/C3/S3/S2 | Main controller. The enclosure uses a LOLIN ESP32-S2 Mini | - |
+| Moisture Sensor | Capacitive soil moisture sensor | S2 Mini: GPIO1 · S3: GPIO4 · C3/C6: GPIO0 |
 | Pump driver | Mini L298 ENA / IN1 (IN2 tied to GND) | GPIO6 PWM, GPIO10 direction |
 | Display | [MSP0963 ST7789](https://2btrading.tn/accueil/9488-module-d-affichage-circulaire-096-240x198-msp0963-st7789-pour-raspberry-stm32-.html) | I2C pins |
 | Environmental Sensors | Temperature, humidity, light | Various |
@@ -135,7 +135,7 @@ On the phone, join Wi-Fi `DRYAD1` / `dryad-mesh`, then open the app. The node ad
 
 ## 🚀 CI/CD
 
-GitHub Actions automatically builds firmware for both ESP32-C6 and ESP32-C3 using ESP-IDF v5.5 on every push to `main` or `dev` branches. Build artifacts are available in the Actions tab.
+GitHub Actions builds every PlatformIO environment on pushes and pull requests to `main` and `dev`. Artifacts from those runs stay on the Actions tab.
 
 ## 📤 Flashing Firmware
 
